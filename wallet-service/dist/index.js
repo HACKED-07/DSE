@@ -29,12 +29,13 @@ app.post("/", (req, res) => {
 });
 app.post("/wallet/credit", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { amount, userId, asset } = req.body;
-    const body = zod_1.z.object({
-        amount: (0, zod_1.number)(),
+    const CreditSchema = zod_1.z.object({
+        amount: (0, zod_1.number)().positive(),
         asset: zod_1.z.enum(["USDT", "BTC", "ETH", "DOGE", "DIDE"]),
         userId: (0, zod_1.number)(),
     });
-    if (!body.safeParse({ amount, userId, asset }).success) {
+    const safeBody = CreditSchema.safeParse({ amount, userId, asset });
+    if (!safeBody.success) {
         return res.json({
             err: "Invalid body",
         });
@@ -42,10 +43,10 @@ app.post("/wallet/credit", (req, res) => __awaiter(void 0, void 0, void 0, funct
     try {
         yield prisma_1.default.ledger.create({
             data: {
-                userId: userId,
-                asset: asset,
-                change: +amount,
-                reason: "DEPOSIT",
+                userId: safeBody.data.userId,
+                asset: safeBody.data.asset,
+                change: `${safeBody.data.amount}`,
+                reason: client_1.Reason.DEPOSIT,
                 ref: "deposit_" + crypto.randomUUID(),
             },
         });
@@ -91,9 +92,12 @@ app.get("/wallet/balance/:userId", (req, res) => __awaiter(void 0, void 0, void 
             err: "Internal server error",
         });
     }
-    const balance = user.reduce((sum, record) => sum + Number(record.change), 0);
-    console.log(balance);
-    res.json({ balance });
+    const netBalance = user.reduce((sum, record) => sum + Number(record.change), 0);
+    const lockedBalance = user
+        .filter((r) => r.reason === "LOCK")
+        .reduce((sum, record) => sum + Number(record.change), 0);
+    const availableBalance = netBalance - lockedBalance;
+    res.json({ availableBalance: availableBalance });
 }));
 app.listen(PORT, () => {
     console.log(`The server is running on http://localhost:${PORT}`);
