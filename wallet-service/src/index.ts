@@ -87,7 +87,7 @@ app.get("/wallet/balance/:userId", async (req, res) => {
   const lockedBalance = user
     .filter((r) => r.reason === "LOCK")
     .reduce((sum, record) => sum + Number(record.change), 0);
-  const availableBalance = netBalance - lockedBalance;
+  const availableBalance = netBalance + lockedBalance;
   res.json({ availableBalance: availableBalance });
 });
 
