@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Lock" ALTER COLUMN "amount" SET DATA TYPE TEXT;
