@@ -50,7 +50,7 @@ model Lock {
   id Int @id @default(autoincrement())
   userId Int
   asset Asset
-  amount Decimal
+  amount String
   ref String
   createdAt DateTime @default(now())
 

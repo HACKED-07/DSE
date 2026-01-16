@@ -18,6 +18,7 @@ const express_1 = __importDefault(require("express"));
 const prisma_1 = __importDefault(require("./lib/prisma"));
 const client_1 = require("./src/generated/prisma/client");
 const zod_1 = require("zod");
+const crypto_1 = __importDefault(require("crypto"));
 const app = (0, express_1.default)();
 const PORT = 3001;
 app.use(express_1.default.json());
@@ -27,12 +28,70 @@ app.post("/", (req, res) => {
         success: "This is working",
     });
 });
+app.post("/wallet/debit", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { amount, userId, asset } = req.body;
+    const DebitSchema = zod_1.z.object({
+        amount: zod_1.z.number().positive(),
+        asset: zod_1.z.enum(["USDT", "BTC", "ETH", "DOGE", "DIDE"]),
+        userId: zod_1.z.number(),
+    });
+    const safeBody = DebitSchema.safeParse({ amount, userId, asset });
+    if (!safeBody.success) {
+        return res.json({
+            err: "Invalid body",
+        });
+    }
+    prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+        try {
+            const ledger = yield tx.ledger.findMany({
+                where: {
+                    userId: safeBody.data.userId,
+                },
+            });
+            const totalBalance = ledger.reduce((sum, rec) => sum + Number(rec.change), 0);
+            const lock = yield tx.lock.findMany({
+                where: {
+                    userId: safeBody.data.userId,
+                },
+            });
+            const lockedBalance = lock.reduce((sum, rec) => sum + Number(rec.amount), 0);
+            const availableBalance = totalBalance - lockedBalance;
+            if (safeBody.data.amount > availableBalance) {
+                return res.json({
+                    err: "Insufficient funds",
+                });
+            }
+            yield tx.ledger.create({
+                data: {
+                    userId: safeBody.data.userId,
+                    asset: safeBody.data.asset,
+                    change: `-${safeBody.data.amount}`,
+                    reason: client_1.Reason.WITHDRAWAL,
+                    ref: "withdrawal_" + crypto_1.default.randomUUID(),
+                },
+            });
+            return res.json({
+                sucecss: "Successfully withdrawaled money",
+            });
+        }
+        catch (e) {
+            if (e instanceof client_1.Prisma.PrismaClientKnownRequestError) {
+                return res.json({
+                    err: "Error in withdrawaling",
+                });
+            }
+            return res.json({
+                err: "Internal server error",
+            });
+        }
+    }));
+}));
 app.post("/wallet/credit", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { amount, userId, asset } = req.body;
     const CreditSchema = zod_1.z.object({
-        amount: (0, zod_1.number)().positive(),
+        amount: zod_1.z.number().positive(),
         asset: zod_1.z.enum(["USDT", "BTC", "ETH", "DOGE", "DIDE"]),
-        userId: (0, zod_1.number)(),
+        userId: zod_1.z.number(),
     });
     const safeBody = CreditSchema.safeParse({ amount, userId, asset });
     if (!safeBody.success) {
@@ -47,7 +106,7 @@ app.post("/wallet/credit", (req, res) => __awaiter(void 0, void 0, void 0, funct
                 asset: safeBody.data.asset,
                 change: `${safeBody.data.amount}`,
                 reason: client_1.Reason.DEPOSIT,
-                ref: "deposit_" + crypto.randomUUID(),
+                ref: "deposit_" + crypto_1.default.randomUUID(),
             },
         });
         return res.json({
@@ -67,7 +126,7 @@ app.post("/wallet/credit", (req, res) => __awaiter(void 0, void 0, void 0, funct
 }));
 app.get("/wallet/balance/:userId", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     let userId = Number(req.params.userId);
-    let user;
+    let ledger;
     if (!userId) {
         return res.json({
             err: "Invalid userId",
@@ -75,7 +134,7 @@ app.get("/wallet/balance/:userId", (req, res) => __awaiter(void 0, void 0, void 
     }
     console.log(process.env.DATABASE_URL);
     try {
-        user = yield prisma_1.default.ledger.findMany({
+        ledger = yield prisma_1.default.ledger.findMany({
             where: {
                 userId: userId,
             },
@@ -92,11 +151,14 @@ app.get("/wallet/balance/:userId", (req, res) => __awaiter(void 0, void 0, void 
             err: "Internal server error",
         });
     }
-    const netBalance = user.reduce((sum, record) => sum + Number(record.change), 0);
-    const lockedBalance = user
-        .filter((r) => r.reason === "LOCK")
-        .reduce((sum, record) => sum + Number(record.change), 0);
-    const availableBalance = netBalance - lockedBalance;
+    const totalBalance = ledger.reduce((sum, record) => sum + Number(record.change), 0);
+    const lock = yield prisma_1.default.lock.findMany({
+        where: {
+            userId: userId,
+        },
+    });
+    const totalLocked = lock.reduce((sum, rec) => sum + Number(rec.amount), 0);
+    const availableBalance = totalBalance - Number(totalLocked);
     res.json({ availableBalance: availableBalance });
 }));
 app.listen(PORT, () => {
