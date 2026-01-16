@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Ledger" ALTER COLUMN "change" SET DATA TYPE TEXT;

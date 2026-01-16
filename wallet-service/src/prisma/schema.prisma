@@ -36,7 +36,7 @@ model Ledger{
   id Int @id @default(autoincrement())
   userId Int
   asset Asset
-  change Decimal
+  change String
   reason Reason
   ref String
   createdAt DateTime @default(now())
