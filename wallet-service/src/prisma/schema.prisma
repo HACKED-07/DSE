@@ -24,8 +24,6 @@ enum Asset {
 }
 
 enum Reason {
-  LOCK
-  RELEASE
   DEPOSIT
   WITHDRAWAL
   TRADE
@@ -51,7 +49,7 @@ model Lock {
   userId Int
   asset Asset
   amount String
-  ref String
+  ref String @unique
   createdAt DateTime @default(now())
 
   @@index([userId, asset])
