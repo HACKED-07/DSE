@@ -1,0 +1,21 @@
+{
+  "name": "matching-engine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsc -b && node dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/express": "^5.0.6",
+    "axios": "^1.13.2",
+    "express": "^5.2.1",
+    "zod": "^4.3.5"
+  }
+}

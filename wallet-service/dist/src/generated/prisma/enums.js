@@ -18,8 +18,6 @@ exports.Asset = {
     DIDE: 'DIDE'
 };
 exports.Reason = {
-    LOCK: 'LOCK',
-    RELEASE: 'RELEASE',
     DEPOSIT: 'DEPOSIT',
     WITHDRAWAL: 'WITHDRAWAL',
     TRADE: 'TRADE'

@@ -40,7 +40,7 @@ model Ledger{
   createdAt DateTime @default(now())
 
   @@index([userId, asset])
-  @@unique([ref, reason])
+  @@index([ref, reason])
   @@schema("wallet")
 }
 

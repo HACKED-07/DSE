@@ -5,19 +5,176 @@ import prisma from "./lib/prisma";
 import { Asset, Prisma, Reason } from "./src/generated/prisma/client";
 import { z } from "zod";
 import crypto from "crypto";
+import cors from "cors";
 
 const app = express();
 const PORT = 3001;
 
 const insufficient_funds = "INSUFFICIENT_FUNDS";
+const noLockfoundError = "NO_LOCKED_AMOUNT";
 const zodAssets = z.enum(Asset);
 
+app.use(cors());
 app.use(express.json());
 app.post("/", (req, res) => {
   console.log("This is working");
   res.json({
     success: "This is working",
   });
+});
+
+app.post("/wallet/settle", async (req, res) => {
+  const body = req.body;
+  const settlementIdSchema = z.object({
+    id: z.number(),
+    amount: z.number(),
+    asset: zodAssets,
+    ref: z.string(),
+  });
+  const settleSchema = z.object({
+    buyer: settlementIdSchema,
+    seller: settlementIdSchema,
+    ref: z.string(),
+  });
+  const safeBody = settleSchema.safeParse(body);
+  if (!safeBody.success) {
+    return res.json({
+      err: "Invalid body",
+    });
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      //checking if trade has already been executed
+      const trade = await tx.ledger.findFirst({
+        where: {
+          ref: safeBody.data.ref,
+        },
+      });
+      if (trade) {
+        throw new Error("Trade already settled");
+      }
+      // checking if the buyer lock exist's in the lock table
+      const buyerLock = await tx.lock.findFirst({
+        where: {
+          userId: safeBody.data.buyer.id,
+          ref: safeBody.data.buyer.ref,
+        },
+      });
+      if (!buyerLock || Number(buyerLock.amount) < safeBody.data.buyer.amount) {
+        throw new Error("Invalid buyer lock");
+      }
+      if (buyerLock.asset !== safeBody.data.buyer.asset) {
+        throw new Error("Invalid buyer asset");
+      }
+
+      // checking if the seller lock exist's in the lock table
+      const sellerLock = await tx.lock.findFirst({
+        where: {
+          userId: safeBody.data.seller.id,
+          ref: safeBody.data.seller.ref,
+        },
+      });
+
+      if (
+        !sellerLock ||
+        Number(sellerLock.amount) < safeBody.data.seller.amount
+      ) {
+        throw new Error("Invalid seller lock");
+      }
+      if (sellerLock.asset !== safeBody.data.seller.asset) {
+        throw new Error("Invalid seller asset");
+      }
+
+      // seller -asset record
+      await tx.ledger.create({
+        data: {
+          userId: safeBody.data.seller.id,
+          asset: safeBody.data.seller.asset,
+          change: `-${safeBody.data.seller.amount}`,
+          reason: Reason.TRADE,
+          ref: safeBody.data.seller.ref,
+        },
+      });
+      // buyer -asset record
+      await tx.ledger.create({
+        data: {
+          userId: safeBody.data.buyer.id,
+          asset: safeBody.data.buyer.asset,
+          change: `-${safeBody.data.buyer.amount}`,
+          reason: Reason.TRADE,
+          ref: safeBody.data.buyer.ref,
+        },
+      });
+      // seller +asset record
+      await tx.ledger.create({
+        data: {
+          userId: safeBody.data.seller.id,
+          asset: safeBody.data.buyer.asset,
+          change: `${safeBody.data.buyer.amount}`,
+          reason: Reason.TRADE,
+          ref: safeBody.data.ref,
+        },
+      });
+      // buyer +asset record
+      await tx.ledger.create({
+        data: {
+          userId: safeBody.data.buyer.id,
+          asset: safeBody.data.seller.asset,
+          change: `${safeBody.data.seller.amount}`,
+          reason: Reason.TRADE,
+          ref: safeBody.data.ref,
+        },
+      });
+      await tx.lock.deleteMany({
+        // releasing the buyer lock
+        where: {
+          userId: safeBody.data.buyer.id,
+          asset: safeBody.data.buyer.asset,
+          ref: safeBody.data.buyer.ref,
+        },
+      });
+      // releasing the  seller lock
+      await tx.lock.deleteMany({
+        where: {
+          userId: safeBody.data.seller.id,
+          asset: safeBody.data.seller.asset,
+          ref: safeBody.data.seller.ref,
+        },
+      });
+    });
+    return res.json({
+      success: "Trade successful",
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === "Trade already settled") {
+      return res.json({
+        success: "Trade already settled",
+      });
+    }
+    if (e instanceof Error && e.message === "Invalid seller lock") {
+      return res.status(400).json({
+        err: "Invalid seller lock",
+      });
+    }
+    if (e instanceof Error && e.message === "Invalid buyer lock") {
+      return res.status(400).json({
+        err: "Invalid buyer lock",
+      });
+    }
+    if (e instanceof Error && e.message === "Invalid seller asset") {
+      return res.status(400).json({
+        err: "Invalid seller asset",
+      });
+    }
+    if (e instanceof Error && e.message === "Invalid buyer asset") {
+      return res.status(400).json({
+        err: "Invalid buyer asset",
+      });
+    }
+    return res.status(500).json({
+      err: "Internal server error",
+    });
+  }
 });
 
 app.post("/wallet/release", async (req, res) => {
@@ -30,7 +187,7 @@ app.post("/wallet/release", async (req, res) => {
   });
   const safeBody = releaseSchema.safeParse({ userId, asset, amount, orderId });
   if (!safeBody.success) {
-    return res.json({
+    return res.status(400).json({
       err: "Invalid body",
     });
   }
@@ -46,10 +203,13 @@ app.post("/wallet/release", async (req, res) => {
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
-      return res.json({
+      return res.status(400).json({
         err: "No lock of found for the request",
       });
     }
+    return res.status(500).json({
+      err: "Internal server error",
+    });
   }
 });
 
