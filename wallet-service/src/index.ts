@@ -215,6 +215,7 @@ app.post("/wallet/release", async (req, res) => {
 
 app.post("/wallet/lock", async (req, res) => {
   const { userId, asset, amount, orderId } = req.body;
+  const lockRef = "lock_" + crypto.randomUUID();
   const LockSchema = z.object({
     userId: z.number(),
     amount: z.number(),
@@ -258,12 +259,13 @@ app.post("/wallet/lock", async (req, res) => {
           userId: safeBody.data.userId,
           asset: safeBody.data.asset,
           amount: String(safeBody.data.amount),
-          ref: safeBody.data.orderId,
+          ref: lockRef,
         },
       });
     });
     return res.json({
       success: "Successfully added lock",
+      lockRef,
     });
   } catch (e) {
     if (
@@ -271,7 +273,7 @@ app.post("/wallet/lock", async (req, res) => {
       e.code === "P2002"
     ) {
       return res.status(400).json({
-        success: "Lock already exits",
+        err: "Lock already exits",
       });
     }
     if (e instanceof Error && e.message === insufficient_funds) {
