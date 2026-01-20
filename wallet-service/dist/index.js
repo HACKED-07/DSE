@@ -220,6 +220,7 @@ app.post("/wallet/release", (req, res) => __awaiter(void 0, void 0, void 0, func
 }));
 app.post("/wallet/lock", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId, asset, amount, orderId } = req.body;
+    const lockRef = "lock_" + crypto_1.default.randomUUID();
     const LockSchema = zod_1.z.object({
         userId: zod_1.z.number(),
         amount: zod_1.z.number(),
@@ -257,19 +258,20 @@ app.post("/wallet/lock", (req, res) => __awaiter(void 0, void 0, void 0, functio
                     userId: safeBody.data.userId,
                     asset: safeBody.data.asset,
                     amount: String(safeBody.data.amount),
-                    ref: safeBody.data.orderId,
+                    ref: lockRef,
                 },
             });
         }));
         return res.json({
             success: "Successfully added lock",
+            lockRef,
         });
     }
     catch (e) {
         if (e instanceof client_1.Prisma.PrismaClientKnownRequestError &&
             e.code === "P2002") {
             return res.status(400).json({
-                success: "Lock already exits",
+                err: "Lock already exits",
             });
         }
         if (e instanceof Error && e.message === insufficient_funds) {
