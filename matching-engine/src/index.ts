@@ -7,12 +7,12 @@ const app = express();
 app.use(express.json());
 const PORT = 3002;
 
-// assigning names so that i can split to get the asset name
-
 type LockResponse = {
   success: string;
   lockRef: string;
 };
+
+// assigning names so that i can split to get the asset name
 enum Markets {
   "BTC/USDT" = "BTC/USDT",
   "ETH/USDT" = "ETH/USDT",
@@ -92,7 +92,7 @@ app.post("/order", async (req, res) => {
   const lockData = lock.data as LockResponse;
   // push the new order to the order book
   if (safeOrder.data.orderType === "BUY") {
-    ORDERBOOK.get(Markets["BTC/USDT"])!.get("buys")!.push({
+    ORDERBOOK.get(safeOrder.data.market)!.get("buys")!.push({
       orderId: lockData.lockRef,
       userId: safeOrder.data.userId,
       price: safeOrder.data.price,
@@ -102,7 +102,7 @@ app.post("/order", async (req, res) => {
       market: safeOrder.data.market,
     });
   } else {
-    ORDERBOOK.get(Markets["BTC/USDT"])!.get("sells")!.push({
+    ORDERBOOK.get(safeOrder.data.market)!.get("sells")!.push({
       orderId: lockData.lockRef,
       userId: safeOrder.data.userId,
       price: safeOrder.data.price,
@@ -112,59 +112,55 @@ app.post("/order", async (req, res) => {
       market: safeOrder.data.market,
     });
   }
-  const buyBTCOrders = ORDERBOOK.get(Markets["BTC/USDT"])!.get("buys");
-  const sellBTCOrders = ORDERBOOK.get(Markets["BTC/USDT"])!.get("sells");
+  while (true) {
+    const buys = ORDERBOOK.get(safeOrder.data.market)!
+      .get("buys")!
+      .sort((a, b) => b.price - a.price);
 
-  if (!buyBTCOrders?.length || !sellBTCOrders?.length) {
-    return res.json({
-      success: "Order placed but orderbook empty",
-    });
-  }
-  const sortBuyBTCOrders = buyBTCOrders?.sort((a, b) => b.price - a.price);
-  const sortSellBTCOrders = sellBTCOrders?.sort((a, b) => a.price - b.price);
+    const sells = ORDERBOOK.get(safeOrder.data.market)!
+      .get("sells")!
+      .sort((a, b) => a.price - b.price);
 
-  while (
-    sortBuyBTCOrders?.length &&
-    sortSellBTCOrders?.length &&
-    sortBuyBTCOrders![0].price >= sortSellBTCOrders![0].price
-  ) {
-    const tradeQty =
-      sortBuyBTCOrders![0].remainingQty > sortSellBTCOrders![0].remainingQty
-        ? sortSellBTCOrders![0].remainingQty
-        : sortBuyBTCOrders![0].remainingQty;
-    const tradePrice = sortSellBTCOrders![0].price;
+    if (!buys.length || !sells.length) break;
+    if (buys[0].price < sells[0].price) break;
 
-    await axios.post("http://localhost:3001/wallet/settle", {
-      buyer: {
-        id: ORDERBOOK.get(Markets["BTC/USDT"])!.get("buys")![0].userId,
-        amount: tradePrice * tradeQty,
-        asset: ORDERBOOK.get(Markets["BTC/USDT"])!
-          .get("buys")![0]
-          .market.split("/")[1],
-        ref: ORDERBOOK.get(Markets["BTC/USDT"])?.get("buys")![0].orderId,
-      },
-      seller: {
-        id: ORDERBOOK.get(Markets["BTC/USDT"])!.get("sells")![0].userId,
-        amount: tradeQty,
-        asset: ORDERBOOK.get(Markets["BTC/USDT"])!
-          .get("sells")![0]
-          .market.split("/")[0],
-        ref: ORDERBOOK.get(Markets["BTC/USDT"])?.get("sells")![0].orderId,
-      },
-      ref: "trade_" + orderId,
-    });
-    sortBuyBTCOrders![0].remainingQty -= tradeQty;
-    sortSellBTCOrders![0].remainingQty -= tradeQty;
+    const buy = buys[0];
+    const sell = sells[0];
 
-    if (sortBuyBTCOrders![0].remainingQty === 0) {
-      ORDERBOOK.get(Markets["BTC/USDT"])!.get("buys")!.shift();
+    const tradeQty = Math.min(buy.remainingQty, sell.remainingQty);
+    const tradePrice = sell.price;
+
+    try {
+      await axios.post("http://localhost:3001/wallet/settle", {
+        buyer: {
+          id: buy.userId,
+          amount: tradePrice * tradeQty,
+          asset: buy.market.split("/")[1],
+          ref: buy.orderId,
+        },
+        seller: {
+          id: sell.userId,
+          amount: tradeQty,
+          asset: sell.market.split("/")[0],
+          ref: sell.orderId,
+        },
+        ref: "trade_" + crypto.randomUUID(),
+      });
+    } catch (e) {
+      console.error("settle failed: ", e);
+      break;
     }
-    if (sortSellBTCOrders![0].remainingQty === 0) {
-      ORDERBOOK.get(Markets["BTC/USDT"])!.get("sells")!.shift();
-    }
+
+    buy.remainingQty -= tradeQty;
+    sell.remainingQty -= tradeQty;
+
+    if (buy.remainingQty === 0)
+      ORDERBOOK.get(safeOrder.data.market)!.get("buys")!.shift();
+    if (sell.remainingQty === 0)
+      ORDERBOOK.get(safeOrder.data.market)!.get("sells")!.shift();
   }
-  //   console.log(sortBuyBTCOrders, "   ", sortSellBTCOrders);
-  console.log(ORDERBOOK.get(Markets["BTC/USDT"]));
+
+  console.log(ORDERBOOK.get(safeOrder.data.market));
   return res.json({
     success: "Succesfully order placed",
   });
@@ -175,6 +171,7 @@ app.post("/cancel", async (req, res) => {
   const CancelSchema = z.object({
     orderId: z.string(),
     userId: z.number(),
+    market: z.enum(Markets),
   });
   const safeBody = CancelSchema.safeParse(body);
   if (!safeBody.success) {
@@ -186,7 +183,7 @@ app.post("/cancel", async (req, res) => {
     success?: string;
     err?: string;
   }
-  const book = ORDERBOOK.get(Markets["BTC/USDT"]);
+  const book = ORDERBOOK.get(safeBody.data.market);
   const order =
     book!
       .get("buys")!
@@ -212,15 +209,15 @@ app.post("/cancel", async (req, res) => {
     });
     const releasedData = data.data as unknown as CancelType;
     if (releasedData.success) {
-      ORDERBOOK.get(Markets["BTC/USDT"])?.set(
+      ORDERBOOK.get(safeBody.data.market)?.set(
         "buys",
-        ORDERBOOK.get(Markets["BTC/USDT"])!
+        ORDERBOOK.get(safeBody.data.market)!
           .get("buys")!
           .filter((o) => o.orderId !== safeBody.data.orderId)
       );
-      ORDERBOOK.get(Markets["BTC/USDT"])?.set(
+      ORDERBOOK.get(safeBody.data.market)?.set(
         "sells",
-        ORDERBOOK.get(Markets["BTC/USDT"])!
+        ORDERBOOK.get(safeBody.data.market)!
           .get("sells")!
           .filter((o) => o.orderId !== safeBody.data.orderId)
       );
