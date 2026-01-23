@@ -125,22 +125,53 @@ app.post("/wallet/settle", async (req, res) => {
           ref: safeBody.data.ref,
         },
       });
-      await tx.lock.deleteMany({
-        // releasing the buyer lock
-        where: {
-          userId: safeBody.data.buyer.id,
-          asset: safeBody.data.buyer.asset,
-          ref: safeBody.data.buyer.ref,
-        },
-      });
+      // releasing the buyer lock
+      const updatedBuyerLock =
+        Number(buyerLock.amount) - safeBody.data.buyer.amount;
+      if (updatedBuyerLock === 0) {
+        await tx.lock.delete({
+          where: {
+            userId: safeBody.data.buyer.id,
+            asset: safeBody.data.buyer.asset,
+            ref: safeBody.data.buyer.ref,
+          },
+        });
+      } else {
+        await tx.lock.update({
+          where: {
+            userId: safeBody.data.buyer.id,
+            asset: safeBody.data.buyer.asset,
+            ref: safeBody.data.buyer.ref,
+          },
+          data: {
+            amount: String(updatedBuyerLock),
+          },
+        });
+      }
       // releasing the  seller lock
-      await tx.lock.deleteMany({
-        where: {
-          userId: safeBody.data.seller.id,
-          asset: safeBody.data.seller.asset,
-          ref: safeBody.data.seller.ref,
-        },
-      });
+      const updatedSellerLock =
+        Number(sellerLock.amount) - safeBody.data.seller.amount;
+
+      if (updatedSellerLock === 0) {
+        await tx.lock.delete({
+          where: {
+            userId: safeBody.data.seller.id,
+            asset: safeBody.data.seller.asset,
+            ref: safeBody.data.seller.ref,
+          },
+        });
+      } else {
+        await tx.lock.update({
+          where: {
+            userId: safeBody.data.seller.id,
+            asset: safeBody.data.seller.asset,
+            ref: safeBody.data.seller.ref,
+          },
+          data: {
+            amount: String(updatedSellerLock),
+          },
+        });
+      }
     });
     return res.json({
       success: "Trade successful",
@@ -178,14 +209,12 @@ app.post("/wallet/settle", async (req, res) => {
 });
 
 app.post("/wallet/release", async (req, res) => {
-  const { userId, asset, amount, orderId } = req.body;
+  const { userId, orderId } = req.body;
   const releaseSchema = z.object({
     userId: z.number(),
-    asset: zodAssets,
-    amount: z.number().positive(),
     orderId: z.string(),
   });
-  const safeBody = releaseSchema.safeParse({ userId, asset, amount, orderId });
+  const safeBody = releaseSchema.safeParse({ userId, orderId });
   if (!safeBody.success) {
     return res.status(400).json({
       err: "Invalid body",
