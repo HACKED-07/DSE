@@ -133,7 +133,6 @@ app.post("/order", async (req, res) => {
         ? sortSellBTCOrders![0].remainingQty
         : sortBuyBTCOrders![0].remainingQty;
     const tradePrice = sortSellBTCOrders![0].price;
-    console.log(ORDERBOOK.get(Markets["BTC/USDT"]));
 
     await axios.post("http://localhost:3001/wallet/settle", {
       buyer: {
@@ -154,15 +153,8 @@ app.post("/order", async (req, res) => {
       },
       ref: "trade_" + orderId,
     });
-    if (
-      sortBuyBTCOrders![0].remainingQty >= sortSellBTCOrders![0].remainingQty
-    ) {
-      sortBuyBTCOrders![0].remainingQty =
-        sortBuyBTCOrders![0].remainingQty - sortSellBTCOrders![0].remainingQty;
-    } else {
-      sortSellBTCOrders![0].remainingQty =
-        sortSellBTCOrders![0].remainingQty - sortBuyBTCOrders![0].remainingQty;
-    }
+    sortBuyBTCOrders![0].remainingQty -= tradeQty;
+    sortSellBTCOrders![0].remainingQty -= tradeQty;
 
     if (sortBuyBTCOrders![0].remainingQty === 0) {
       ORDERBOOK.get(Markets["BTC/USDT"])!.get("buys")!.shift();
@@ -172,9 +164,79 @@ app.post("/order", async (req, res) => {
     }
   }
   //   console.log(sortBuyBTCOrders, "   ", sortSellBTCOrders);
+  console.log(ORDERBOOK.get(Markets["BTC/USDT"]));
   return res.json({
     success: "Succesfully order placed",
   });
+});
+
+app.post("/cancel", async (req, res) => {
+  const body = req.body;
+  const CancelSchema = z.object({
+    orderId: z.string(),
+    userId: z.number(),
+  });
+  const safeBody = CancelSchema.safeParse(body);
+  if (!safeBody.success) {
+    return res.json({
+      err: "Invalid body",
+    });
+  }
+  interface CancelType {
+    success?: string;
+    err?: string;
+  }
+  const book = ORDERBOOK.get(Markets["BTC/USDT"]);
+  const order =
+    book!
+      .get("buys")!
+      .find((order) => order.orderId === safeBody.data.orderId) ??
+    book!
+      .get("sells")
+      ?.find((order) => order.orderId === safeBody.data.orderId);
+
+  if (!order) {
+    return res.status(400).json({
+      err: "No order found!",
+    });
+  }
+  if (order.originalQty !== order.remainingQty) {
+    return res.status(400).json({
+      err: "Order already partially filled!",
+    });
+  }
+  try {
+    const data = await axios.post("http://localhost:3001/wallet/release", {
+      userId: safeBody.data.userId,
+      orderId: safeBody.data.orderId,
+    });
+    const releasedData = data.data as unknown as CancelType;
+    if (releasedData.success) {
+      ORDERBOOK.get(Markets["BTC/USDT"])?.set(
+        "buys",
+        ORDERBOOK.get(Markets["BTC/USDT"])!
+          .get("buys")!
+          .filter((o) => o.orderId !== safeBody.data.orderId)
+      );
+      ORDERBOOK.get(Markets["BTC/USDT"])?.set(
+        "sells",
+        ORDERBOOK.get(Markets["BTC/USDT"])!
+          .get("sells")!
+          .filter((o) => o.orderId !== safeBody.data.orderId)
+      );
+      return res.json({
+        success: "Successfully canceled order",
+      });
+    } else {
+      return res.status(400).json({
+        err: "Couldn't cancel the order",
+      });
+    }
+  } catch (e) {
+    return res.status(400).json({
+      err: "Wallet refused release",
+    });
+  }
 });
 
 app.listen(PORT, () => {

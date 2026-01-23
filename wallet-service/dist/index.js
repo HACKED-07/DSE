@@ -130,22 +130,52 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
                     ref: safeBody.data.ref,
                 },
             });
-            yield tx.lock.deleteMany({
-                // releasing the buyer lock
-                where: {
-                    userId: safeBody.data.buyer.id,
-                    asset: safeBody.data.buyer.asset,
-                    ref: safeBody.data.buyer.ref,
-                },
-            });
+            // releasing the buyer lock
+            const updatedBuyerLock = Number(buyerLock.amount) - safeBody.data.buyer.amount;
+            if (updatedBuyerLock === 0) {
+                yield tx.lock.delete({
+                    where: {
+                        userId: safeBody.data.buyer.id,
+                        asset: safeBody.data.buyer.asset,
+                        ref: safeBody.data.buyer.ref,
+                    },
+                });
+            }
+            else {
+                yield tx.lock.update({
+                    where: {
+                        userId: safeBody.data.buyer.id,
+                        asset: safeBody.data.buyer.asset,
+                        ref: safeBody.data.buyer.ref,
+                    },
+                    data: {
+                        amount: String(updatedBuyerLock),
+                    },
+                });
+            }
             // releasing the  seller lock
-            yield tx.lock.deleteMany({
-                where: {
-                    userId: safeBody.data.seller.id,
-                    asset: safeBody.data.seller.asset,
-                    ref: safeBody.data.seller.ref,
-                },
-            });
+            const updatedSellerLock = Number(sellerLock.amount) - safeBody.data.seller.amount;
+            if (updatedSellerLock === 0) {
+                yield tx.lock.delete({
+                    where: {
+                        userId: safeBody.data.seller.id,
+                        asset: safeBody.data.seller.asset,
+                        ref: safeBody.data.seller.ref,
+                    },
+                });
+            }
+            else {
+                yield tx.lock.update({
+                    where: {
+                        userId: safeBody.data.seller.id,
+                        asset: safeBody.data.seller.asset,
+                        ref: safeBody.data.seller.ref,
+                    },
+                    data: {
+                        amount: String(updatedSellerLock),
+                    },
+                });
+            }
         }));
         return res.json({
             success: "Trade successful",
@@ -183,14 +213,12 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 }));
 app.post("/wallet/release", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { userId, asset, amount, orderId } = req.body;
+    const { userId, orderId } = req.body;
     const releaseSchema = zod_1.z.object({
         userId: zod_1.z.number(),
-        asset: zodAssets,
-        amount: zod_1.z.number().positive(),
         orderId: zod_1.z.string(),
     });
-    const safeBody = releaseSchema.safeParse({ userId, asset, amount, orderId });
+    const safeBody = releaseSchema.safeParse({ userId, orderId });
     if (!safeBody.success) {
         return res.status(400).json({
             err: "Invalid body",

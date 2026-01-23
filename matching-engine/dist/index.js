@@ -121,7 +121,6 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             ? sortSellBTCOrders[0].remainingQty
             : sortBuyBTCOrders[0].remainingQty;
         const tradePrice = sortSellBTCOrders[0].price;
-        console.log(ORDERBOOK.get(Markets["BTC/USDT"]));
         yield axios_1.default.post("http://localhost:3001/wallet/settle", {
             buyer: {
                 id: ORDERBOOK.get(Markets["BTC/USDT"]).get("buys")[0].userId,
@@ -141,14 +140,8 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             },
             ref: "trade_" + orderId,
         });
-        if (sortBuyBTCOrders[0].remainingQty >= sortSellBTCOrders[0].remainingQty) {
-            sortBuyBTCOrders[0].remainingQty =
-                sortBuyBTCOrders[0].remainingQty - sortSellBTCOrders[0].remainingQty;
-        }
-        else {
-            sortSellBTCOrders[0].remainingQty =
-                sortSellBTCOrders[0].remainingQty - sortBuyBTCOrders[0].remainingQty;
-        }
+        sortBuyBTCOrders[0].remainingQty -= tradeQty;
+        sortSellBTCOrders[0].remainingQty -= tradeQty;
         if (sortBuyBTCOrders[0].remainingQty === 0) {
             ORDERBOOK.get(Markets["BTC/USDT"]).get("buys").shift();
         }
@@ -157,9 +150,67 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         }
     }
     //   console.log(sortBuyBTCOrders, "   ", sortSellBTCOrders);
+    console.log(ORDERBOOK.get(Markets["BTC/USDT"]));
     return res.json({
         success: "Succesfully order placed",
     });
+}));
+app.post("/cancel", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const body = req.body;
+    const CancelSchema = zod_1.z.object({
+        orderId: zod_1.z.string(),
+        userId: zod_1.z.number(),
+    });
+    const safeBody = CancelSchema.safeParse(body);
+    if (!safeBody.success) {
+        return res.json({
+            err: "Invalid body",
+        });
+    }
+    const book = ORDERBOOK.get(Markets["BTC/USDT"]);
+    const order = (_a = book
+        .get("buys")
+        .find((order) => order.orderId === safeBody.data.orderId)) !== null && _a !== void 0 ? _a : (_b = book
+        .get("sells")) === null || _b === void 0 ? void 0 : _b.find((order) => order.orderId === safeBody.data.orderId);
+    if (!order) {
+        return res.status(400).json({
+            err: "No order found!",
+        });
+    }
+    if (order.originalQty !== order.remainingQty) {
+        return res.status(400).json({
+            err: "Order already partially filled!",
+        });
+    }
+    try {
+        const data = yield axios_1.default.post("http://localhost:3001/wallet/release", {
+            userId: safeBody.data.userId,
+            orderId: safeBody.data.orderId,
+        });
+        const releasedData = data.data;
+        if (releasedData.success) {
+            (_c = ORDERBOOK.get(Markets["BTC/USDT"])) === null || _c === void 0 ? void 0 : _c.set("buys", ORDERBOOK.get(Markets["BTC/USDT"])
+                .get("buys")
+                .filter((o) => o.orderId !== safeBody.data.orderId));
+            (_d = ORDERBOOK.get(Markets["BTC/USDT"])) === null || _d === void 0 ? void 0 : _d.set("sells", ORDERBOOK.get(Markets["BTC/USDT"])
+                .get("sells")
+                .filter((o) => o.orderId !== safeBody.data.orderId));
+            return res.json({
+                success: "Successfully canceled order",
+            });
+        }
+        else {
+            return res.status(400).json({
+                err: "Couldn't cancel the order",
+            });
+        }
+    }
+    catch (e) {
+        return res.status(400).json({
+            err: "Wallet refused release",
+        });
+    }
 }));
 app.listen(PORT, () => {
     console.log(`The server is running on http://localhost:${PORT}`);
