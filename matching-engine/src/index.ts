@@ -150,6 +150,9 @@ app.post("/order", async (req, res) => {
       console.error("settle failed: ", e);
       break;
     }
+    console.log(
+      `TRADE: ${buy.userId} buys ${tradeQty} @ ${tradePrice} from ${sell.userId}`
+    );
 
     buy.remainingQty -= tradeQty;
     sell.remainingQty -= tradeQty;
