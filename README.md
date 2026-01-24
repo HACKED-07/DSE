@@ -1,74 +1,151 @@
 # Mini Exchange Backend
 
-A simplified crypto exchange backend that supports:
+A minimal crypto exchange backend designed to demonstrate **correct trade settlement, balance safety, and partial-fill handling**.
 
-- Order matching (BUY / SELL)
-- Wallet locking before trade
-- Partial fills
-- Atomic settlement
-- Ledger-based balances
-- Order cancellation with lock release
+This system intentionally avoids UI, persistence, and real networking complexity to focus on **core correctness problems in trading systems**:
 
-This project focuses on **correctness and fund safety**, not UI.
+* Double-spend prevention
+* Partial fill settlement
+* Atomic balance updates
+* Lock-based fund control
 
 ---
 
 ## Architecture
 
-There are two services:
+Two independent services communicate over HTTP.
 
-### 1. Matching Engine (port 3002)
-- Accepts orders
-- Maintains in-memory order books
-- Matches best bid/ask
-- Calls wallet service for lock & settlement
+### 1) Matching Engine (port `3002`)
 
-### 2. Wallet Service (port 3001)
-- Ledger-based accounting
-- Lock table to prevent double-spend
-- Atomic settlement using DB transactions
+* Accepts orders
+* Maintains in-memory order books
+* Matches best bid/ask
+* Requests balance locks before accepting orders
+* Calls wallet service to settle matched trades
+
+### 2) Wallet Service (port `3001`)
+
+* Ledger-based accounting (no mutable balances)
+* Lock table prevents double-spend
+* Atomic settlement using DB transactions
+* Idempotent trade settlement via `ref`
+
+This mirrors how real exchanges split **price discovery** and **fund custody**.
 
 ---
 
 ## Trade Lifecycle
 
-1. User places order via `/order`
-2. Matching engine calls `/wallet/lock`
-3. Funds are locked
-4. Order enters orderbook
-5. Best BUY and SELL are matched
-6. `/wallet/settle` is called
-7. Ledger updated atomically
-8. Locks are reduced or deleted
+1. Client sends order to `/order`
+2. Matching engine requests `/wallet/lock`
+3. Wallet validates available balance and creates a lock
+4. Order is inserted into orderbook
+5. Engine matches best BUY and SELL
+6. `/wallet/settle` is called with both lock refs
+7. Ledger rows are written atomically
+8. Lock rows are reduced or deleted
 9. Orders are removed or partially filled
+
+At no point are funds moved without a verified lock.
+
+---
+
+## Design Notes
+
+### Atomic Settlement
+
+Settlement is performed inside a single database transaction:
+
+* Buyer USDT is debited
+* Seller BTC is debited
+* Seller receives USDT
+* Buyer receives BTC
+
+If any step fails, **none of them commit**.
+This prevents partial state corruption.
+
+---
+
+### Lock-Based Balance Control
+
+Balances are never directly checked.
+
+Instead:
+
+```
+available = ledger_sum - locked_sum
+```
+
+This prevents:
+
+* overspending
+* race conditions
+* inconsistent reads
+
+Locks act as **temporary ownership claims**.
+
+---
+
+### Idempotent Trade Execution
+
+Each settlement uses a unique `ref`.
+
+Before executing, the wallet checks:
+
+```ts
+tx.ledger.findFirst({ where: { ref } })
+```
+
+If found, the trade is skipped.
+
+This prevents:
+
+* duplicate settlements
+* retry bugs
+* replay attacks
+
+---
+
+### Partial Fills
+
+Locks are **not released** on partial trades.
+
+Instead:
+
+```ts
+lock.amount -= traded_amount
+```
+
+Only when the amount reaches zero is the lock deleted.
+
+This mirrors how real exchanges maintain remaining order collateral.
 
 ---
 
 ## Setup
 
-### 1. Start wallet service
+### Wallet Service
+
 ```bash
 cd wallet-service
 npm install
 npx prisma migrate dev
 npm run dev
-
 ```
 
-### 2. Start matching engine
+### Matching Engine
 
 ```bash
 cd matching-engine
 npm install
 npm run dev
-
 ```
 
 ---
 
-## API Examples
+## API Demo
 
-### Credit wallet
+### Fund Users
 
 ```bash
 curl -X POST http://localhost:3001/wallet/credit \
@@ -78,10 +155,9 @@ curl -X POST http://localhost:3001/wallet/credit \
 curl -X POST http://localhost:3001/wallet/credit \
   -H "Content-Type: application/json" \
   -d '{"userId":2,"asset":"BTC","amount":5}'
-
 ```
 
-### Place BUY order
+### Place BUY
 
 ```bash
 curl -X POST http://localhost:3002/order \
@@ -93,10 +169,9 @@ curl -X POST http://localhost:3002/order \
     "orderType":"BUY",
     "market":"BTC/USDT"
   }'
-
 ```
 
-### Place SELL order
+### Place SELL
 
 ```bash
 curl -X POST http://localhost:3002/order \
@@ -108,7 +183,6 @@ curl -X POST http://localhost:3002/order \
     "orderType":"SELL",
     "market":"BTC/USDT"
   }'
-
 ```
 
 ### Cancel Order
@@ -121,23 +195,15 @@ curl -X POST http://localhost:3002/cancel \
     "orderId":"<lockRef>",
     "market":"BTC/USDT"
   }'
-
 ```
 
 ---
-
-## Design Notes
-
-* Uses locks instead of direct balance updates before trade
-* Uses ledger entries instead of mutable balances
-* Settlement runs inside a single DB transaction
-* Prevents double-spend and partial settlement bugs
 
 ## Limitations
 
 * In-memory orderbook
 * No persistence for orders
-* No WebSocket price feed
+* No WebSockets
 * No frontend
 
-*These were intentionally skipped to focus on core correctness.*
+These were intentionally excluded to isolate **core financial correctness**.
