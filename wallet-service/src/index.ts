@@ -259,6 +259,7 @@ app.post("/wallet/lock", async (req, res) => {
   }
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
       const ledger = await tx.ledger.findMany({
         where: {
           userId: safeBody.data.userId,

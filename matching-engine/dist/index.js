@@ -16,8 +16,10 @@ const express_1 = __importDefault(require("express"));
 const axios_1 = __importDefault(require("axios"));
 const zod_1 = require("zod");
 const crypto_1 = __importDefault(require("crypto"));
+const cors_1 = __importDefault(require("cors"));
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
+app.use((0, cors_1.default)());
 const PORT = 3002;
 var Markets;
 (function (Markets) {
@@ -27,18 +29,15 @@ var Markets;
     Markets["DIDE/USDT"] = "DIDE/USDT";
 })(Markets || (Markets = {}));
 const ORDERBOOK = new Map();
-ORDERBOOK.set(Markets["BTC/USDT"], new Map());
-ORDERBOOK.get(Markets["BTC/USDT"]).set("buys", []);
-ORDERBOOK.get(Markets["BTC/USDT"]).set("sells", []);
-ORDERBOOK.set(Markets["DIDE/USDT"], new Map());
-ORDERBOOK.get(Markets["DIDE/USDT"]).set("buys", []);
-ORDERBOOK.get(Markets["DIDE/USDT"]).set("sells", []);
-ORDERBOOK.set(Markets["DOGE/USDT"], new Map());
-ORDERBOOK.get(Markets["DOGE/USDT"]).set("buys", []);
-ORDERBOOK.get(Markets["DOGE/USDT"]).set("sells", []);
-ORDERBOOK.set(Markets["ETH/USDT"], new Map());
-ORDERBOOK.get(Markets["ETH/USDT"]).set("buys", []);
-ORDERBOOK.get(Markets["ETH/USDT"]).set("sells", []);
+const initMarket = (market) => {
+    ORDERBOOK.set(market, new Map());
+    ORDERBOOK.get(market).set("buys", []);
+    ORDERBOOK.get(market).set("sells", []);
+};
+initMarket(Markets["BTC/USDT"]);
+initMarket(Markets["ETH/USDT"]);
+initMarket(Markets["DOGE/USDT"]);
+initMarket(Markets["DIDE/USDT"]);
 app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const body = req.body;
     const orderId = crypto_1.default.randomUUID();
@@ -51,12 +50,9 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     });
     const safeOrder = OrderSchema.safeParse(body);
     if (!safeOrder.success) {
-        console.log("zod error:", safeOrder.error);
-        return res.status(400).json({
-            err: "Invalid body",
-        });
+        return res.status(400).json({ err: "Invalid body" });
     }
-    // Lock before adding order to order book
+    // 1. Lock Funds
     let lockBody;
     if (safeOrder.data.orderType === "BUY") {
         lockBody = {
@@ -74,86 +70,86 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             orderId,
         };
     }
-    const lock = yield axios_1.default.post("http://localhost:3001/wallet/lock", lockBody);
-    if (!lock) {
-        return res.status(400).json({
-            err: "error communicating with wallet service",
-        });
-    }
-    const lockData = lock.data;
-    // push the new order to the order book
-    if (safeOrder.data.orderType === "BUY") {
-        ORDERBOOK.get(safeOrder.data.market).get("buys").push({
+    try {
+        const lock = yield axios_1.default.post("http://localhost:3001/wallet/lock", lockBody);
+        const lockData = lock.data;
+        // 2. Create Order Object
+        const newOrder = {
             orderId: lockData.lockRef,
             userId: safeOrder.data.userId,
             price: safeOrder.data.price,
             originalQty: safeOrder.data.qty,
             remainingQty: safeOrder.data.qty,
-            orderType: "BUY",
+            orderType: safeOrder.data.orderType,
             market: safeOrder.data.market,
-        });
-    }
-    else {
-        ORDERBOOK.get(safeOrder.data.market).get("sells").push({
-            orderId: lockData.lockRef,
-            userId: safeOrder.data.userId,
-            price: safeOrder.data.price,
-            originalQty: safeOrder.data.qty,
-            remainingQty: safeOrder.data.qty,
-            orderType: "SELL",
-            market: safeOrder.data.market,
-        });
-    }
-    while (true) {
-        const buys = ORDERBOOK.get(safeOrder.data.market)
-            .get("buys")
-            .sort((a, b) => b.price - a.price);
-        const sells = ORDERBOOK.get(safeOrder.data.market)
-            .get("sells")
-            .sort((a, b) => a.price - b.price);
-        if (!buys.length || !sells.length)
-            break;
-        if (buys[0].price < sells[0].price)
-            break;
-        const buy = buys[0];
-        const sell = sells[0];
-        const tradeQty = Math.min(buy.remainingQty, sell.remainingQty);
-        const tradePrice = sell.price;
-        try {
-            yield axios_1.default.post("http://localhost:3001/wallet/settle", {
-                buyer: {
-                    id: buy.userId,
-                    amount: tradePrice * tradeQty,
-                    asset: buy.market.split("/")[1],
-                    ref: buy.orderId,
-                },
-                seller: {
-                    id: sell.userId,
-                    amount: tradeQty,
-                    asset: sell.market.split("/")[0],
-                    ref: sell.orderId,
-                },
-                ref: "trade_" + crypto_1.default.randomUUID(),
-            });
+            timestamp: Date.now(),
+        };
+        const marketBook = ORDERBOOK.get(safeOrder.data.market);
+        if (newOrder.orderType === "BUY") {
+            marketBook.get("buys").push(newOrder);
+            marketBook
+                .get("buys")
+                .sort((a, b) => b.price - a.price || a.timestamp - b.timestamp);
         }
-        catch (e) {
-            console.error("settle failed: ", e);
-            break;
+        else {
+            marketBook.get("sells").push(newOrder);
+            marketBook
+                .get("sells")
+                .sort((a, b) => a.price - b.price || a.timestamp - b.timestamp);
         }
-        buy.remainingQty -= tradeQty;
-        sell.remainingQty -= tradeQty;
-        if (buy.remainingQty === 0)
-            ORDERBOOK.get(safeOrder.data.market).get("buys").shift();
-        if (sell.remainingQty === 0)
-            ORDERBOOK.get(safeOrder.data.market).get("sells").shift();
+        // 4. Matching Engine
+        const buys = marketBook.get("buys");
+        const sells = marketBook.get("sells");
+        while (buys.length > 0 && sells.length > 0) {
+            const bestBuy = buys[0];
+            const bestSell = sells[0];
+            if (bestBuy.price < bestSell.price) {
+                break;
+            }
+            // MATCH FOUND
+            const tradeQty = Math.min(bestBuy.remainingQty, bestSell.remainingQty);
+            const tradePrice = bestBuy.timestamp < bestSell.timestamp ? bestBuy.price : bestSell.price;
+            // Execute Trade
+            try {
+                yield axios_1.default.post("http://localhost:3001/wallet/settle", {
+                    buyer: {
+                        id: bestBuy.userId,
+                        amount: tradePrice * tradeQty,
+                        asset: bestBuy.market.split("/")[1],
+                        ref: bestBuy.orderId,
+                    },
+                    seller: {
+                        id: bestSell.userId,
+                        amount: tradeQty,
+                        asset: bestSell.market.split("/")[0],
+                        ref: bestSell.orderId,
+                    },
+                    ref: "trade_" + crypto_1.default.randomUUID(),
+                });
+            }
+            catch (e) {
+                console.error("settle failed: ", e);
+                break;
+            }
+            console.log(`TRADE:${bestBuy.market} ${tradeQty} @ ${tradePrice} (${bestBuy.userId} buys from ${bestSell.userId})`);
+            // Update Quantities
+            bestBuy.remainingQty -= tradeQty;
+            bestSell.remainingQty -= tradeQty;
+            // Remove filled orders
+            if (bestBuy.remainingQty === 0)
+                buys.shift();
+            if (bestSell.remainingQty === 0)
+                sells.shift();
+        }
+        return res.json({ success: "Successfully order placed" });
     }
-    console.log(ORDERBOOK.get(safeOrder.data.market));
-    return res.json({
-        success: "Succesfully order placed",
-    });
+    catch (e) {
+        return res
+            .status(400)
+            .json({ err: "error communicating with wallet service" });
+    }
 }));
 app.post("/cancel", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
     const body = req.body;
     const CancelSchema = zod_1.z.object({
         orderId: zod_1.z.string(),
@@ -161,54 +157,50 @@ app.post("/cancel", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         market: zod_1.z.enum(Markets),
     });
     const safeBody = CancelSchema.safeParse(body);
-    if (!safeBody.success) {
-        return res.json({
-            err: "Invalid body",
-        });
-    }
+    if (!safeBody.success)
+        return res.json({ err: "Invalid body" });
     const book = ORDERBOOK.get(safeBody.data.market);
-    const order = (_a = book
-        .get("buys")
-        .find((order) => order.orderId === safeBody.data.orderId)) !== null && _a !== void 0 ? _a : (_b = book
-        .get("sells")) === null || _b === void 0 ? void 0 : _b.find((order) => order.orderId === safeBody.data.orderId);
-    if (!order) {
-        return res.status(400).json({
-            err: "No order found!",
-        });
-    }
-    if (order.originalQty !== order.remainingQty) {
-        return res.status(400).json({
-            err: "Order already partially filled!",
-        });
+    if (!book)
+        return res.status(400).json({ err: "Market not found" });
+    const removeFromSide = (side) => {
+        const list = book.get(side);
+        const index = list.findIndex((o) => o.orderId === safeBody.data.orderId);
+        if (index > -1) {
+            const order = list[index];
+            if (order.userId !== safeBody.data.userId)
+                return null;
+            if (order.originalQty !== order.remainingQty)
+                return null;
+            list.splice(index, 1);
+            return order;
+        }
+        return null;
+    };
+    const canceledOrder = removeFromSide("buys") || removeFromSide("sells");
+    if (!canceledOrder) {
+        return res.status(400).json({ err: "Order not found or already filled" });
     }
     try {
-        const data = yield axios_1.default.post("http://localhost:3001/wallet/release", {
+        yield axios_1.default.post("http://localhost:3001/wallet/release", {
             userId: safeBody.data.userId,
             orderId: safeBody.data.orderId,
         });
-        const releasedData = data.data;
-        if (releasedData.success) {
-            (_c = ORDERBOOK.get(safeBody.data.market)) === null || _c === void 0 ? void 0 : _c.set("buys", ORDERBOOK.get(safeBody.data.market)
-                .get("buys")
-                .filter((o) => o.orderId !== safeBody.data.orderId));
-            (_d = ORDERBOOK.get(safeBody.data.market)) === null || _d === void 0 ? void 0 : _d.set("sells", ORDERBOOK.get(safeBody.data.market)
-                .get("sells")
-                .filter((o) => o.orderId !== safeBody.data.orderId));
-            return res.json({
-                success: "Successfully canceled order",
-            });
-        }
-        else {
-            return res.status(400).json({
-                err: "Couldn't cancel the order",
-            });
-        }
+        return res.json({ success: "Successfully canceled order" });
     }
     catch (e) {
-        return res.status(400).json({
-            err: "Wallet refused release",
-        });
+        return res.status(400).json({ err: "Wallet refused release" });
     }
+}));
+app.get("/markets/:symbol", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const symbol = req.params.symbol;
+    const market = symbol.replace("_", "/");
+    if (!ORDERBOOK.get(market)) {
+        return res.status(400).json({ err: "No market found for the symbol" });
+    }
+    const smallOrderBook = ORDERBOOK.get(market);
+    const buys = smallOrderBook.get("buys").slice(0, 20);
+    const sells = smallOrderBook.get("sells").slice(0, 20);
+    return res.json({ buys, sells });
 }));
 app.listen(PORT, () => {
     console.log(`The server is running on http://localhost:${PORT}`);

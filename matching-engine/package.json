@@ -15,7 +15,11 @@
     "@types/axios": "^0.9.36",
     "@types/express": "^5.0.6",
     "axios": "^1.13.2",
+    "cors": "^2.8.6",
     "express": "^5.2.1",
     "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19"
   }
 }
