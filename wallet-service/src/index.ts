@@ -11,7 +11,6 @@ const app = express();
 const PORT = 3001;
 
 const insufficient_funds = "INSUFFICIENT_FUNDS";
-const noLockfoundError = "NO_LOCKED_AMOUNT";
 const zodAssets = z.enum(Asset);
 
 app.use(cors());
@@ -44,7 +43,7 @@ app.post("/wallet/settle", async (req, res) => {
   }
   try {
     await prisma.$transaction(async (tx) => {
-      //checking if trade has already been executed
+      // check if trade has already been executed
       const trade = await tx.ledger.findFirst({
         where: {
           ref: safeBody.data.ref,
@@ -53,7 +52,8 @@ app.post("/wallet/settle", async (req, res) => {
       if (trade) {
         throw new Error("Trade already settled");
       }
-      // checking if the buyer lock exist's in the lock table
+
+      // check if the buyer lock exist's in the lock table
       const buyerLock = await tx.lock.findFirst({
         where: {
           userId: safeBody.data.buyer.id,
@@ -67,20 +67,20 @@ app.post("/wallet/settle", async (req, res) => {
         throw new Error("Invalid buyer asset");
       }
 
-      // checking if the seller lock exist's in the lock table
+      // check if the seller lock exist's in the lock table
       const sellerLock = await tx.lock.findFirst({
         where: {
           userId: safeBody.data.seller.id,
           ref: safeBody.data.seller.ref,
         },
       });
-
       if (
         !sellerLock ||
         Number(sellerLock.amount) < safeBody.data.seller.amount
       ) {
         throw new Error("Invalid seller lock");
       }
+
       if (sellerLock.asset !== safeBody.data.seller.asset) {
         throw new Error("Invalid seller asset");
       }
@@ -125,7 +125,8 @@ app.post("/wallet/settle", async (req, res) => {
           ref: safeBody.data.ref,
         },
       });
-      // releasing the buyer lock
+    
+      // release the buyer lock
       const updatedBuyerLock =
         Number(buyerLock.amount) - safeBody.data.buyer.amount;
       if (updatedBuyerLock === 0) {
@@ -148,10 +149,10 @@ app.post("/wallet/settle", async (req, res) => {
           },
         });
       }
-      // releasing the  seller lock
+
+      // release the  seller lock
       const updatedSellerLock =
         Number(sellerLock.amount) - safeBody.data.seller.amount;
-
       if (updatedSellerLock === 0) {
         await tx.lock.delete({
           where: {
@@ -333,6 +334,7 @@ app.post("/wallet/debit", async (req, res) => {
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
       const ledger = await tx.ledger.findMany({
         where: {
           userId: safeBody.data.userId,
@@ -488,9 +490,7 @@ app.get("/wallet/balance/:userId", async (req, res) => {
     balances[r].available = balances[r].total - balances[r].locked;
   }
   console.log(balances);
-  const totalLocked = lock.reduce((sum, rec) => sum + Number(rec.amount), 0);
-  const availableBalance = totalBalance - Number(totalLocked);
-  res.json({ availableBalance: availableBalance });
+  res.json(balances);
 });
 
 app.listen(PORT, () => {

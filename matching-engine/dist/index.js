@@ -52,7 +52,6 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     if (!safeOrder.success) {
         return res.status(400).json({ err: "Invalid body" });
     }
-    // 1. Lock Funds
     let lockBody;
     if (safeOrder.data.orderType === "BUY") {
         lockBody = {
@@ -73,7 +72,6 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     try {
         const lock = yield axios_1.default.post("http://localhost:3001/wallet/lock", lockBody);
         const lockData = lock.data;
-        // 2. Create Order Object
         const newOrder = {
             orderId: lockData.lockRef,
             userId: safeOrder.data.userId,
@@ -97,7 +95,6 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 .get("sells")
                 .sort((a, b) => a.price - b.price || a.timestamp - b.timestamp);
         }
-        // 4. Matching Engine
         const buys = marketBook.get("buys");
         const sells = marketBook.get("sells");
         while (buys.length > 0 && sells.length > 0) {
@@ -106,10 +103,8 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             if (bestBuy.price < bestSell.price) {
                 break;
             }
-            // MATCH FOUND
             const tradeQty = Math.min(bestBuy.remainingQty, bestSell.remainingQty);
             const tradePrice = bestBuy.timestamp < bestSell.timestamp ? bestBuy.price : bestSell.price;
-            // Execute Trade
             try {
                 yield axios_1.default.post("http://localhost:3001/wallet/settle", {
                     buyer: {
@@ -132,10 +127,8 @@ app.post("/order", (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 break;
             }
             console.log(`TRADE:${bestBuy.market} ${tradeQty} @ ${tradePrice} (${bestBuy.userId} buys from ${bestSell.userId})`);
-            // Update Quantities
             bestBuy.remainingQty -= tradeQty;
             bestSell.remainingQty -= tradeQty;
-            // Remove filled orders
             if (bestBuy.remainingQty === 0)
                 buys.shift();
             if (bestSell.remainingQty === 0)
