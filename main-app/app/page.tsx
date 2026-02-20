@@ -1,21 +1,20 @@
+import { auth } from "@/auth";
+import { Dashboard } from "@/components/Dashboard";
+import { Landing } from "@/components/Landing";
+import SignIn from "@/components/sign-in";
 import axios from "axios";
+import { cookies } from "next/headers";
 
 export default async function Home() {
-  const market = await axios.get("http://localhost:3002/markets/BTC_USDT");
-  console.log(market.data);
-  return (
-    <div>
-      <label htmlFor="userId">User Id: </label>
-      <input type="text" id="userId" />
-      <label htmlFor="price">Price: </label>
-      <input type="text" id="price" />
-      <label htmlFor="qty">Quantity: </label>
-      <input type="text" id="qty" />
-      <label htmlFor="asset">Asset: </label>
-      <input type="text" id="asset" />
-      <button>Buy</button>
-      <button>Sell</button>
-      <button>cancel</button>
-    </div>
-  );
+  const session = await auth();
+  if(!session?.user) {
+    return (
+      <Landing />
+    )
+  } else {
+    console.log(session.user.id)
+    return (
+    <Dashboard session={session} />
+  )
+  }
 }

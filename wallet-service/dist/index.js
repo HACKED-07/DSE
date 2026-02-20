@@ -23,7 +23,6 @@ const cors_1 = __importDefault(require("cors"));
 const app = (0, express_1.default)();
 const PORT = 3001;
 const insufficient_funds = "INSUFFICIENT_FUNDS";
-const noLockfoundError = "NO_LOCKED_AMOUNT";
 const zodAssets = zod_1.z.enum(client_1.Asset);
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
@@ -54,7 +53,7 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
     try {
         yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
-            //checking if trade has already been executed
+            // check if trade has already been executed
             const trade = yield tx.ledger.findFirst({
                 where: {
                     ref: safeBody.data.ref,
@@ -63,7 +62,7 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
             if (trade) {
                 throw new Error("Trade already settled");
             }
-            // checking if the buyer lock exist's in the lock table
+            // check if the buyer lock exist's in the lock table
             const buyerLock = yield tx.lock.findFirst({
                 where: {
                     userId: safeBody.data.buyer.id,
@@ -76,7 +75,7 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
             if (buyerLock.asset !== safeBody.data.buyer.asset) {
                 throw new Error("Invalid buyer asset");
             }
-            // checking if the seller lock exist's in the lock table
+            // check if the seller lock exist's in the lock table
             const sellerLock = yield tx.lock.findFirst({
                 where: {
                     userId: safeBody.data.seller.id,
@@ -130,7 +129,7 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
                     ref: safeBody.data.ref,
                 },
             });
-            // releasing the buyer lock
+            // release the buyer lock
             const updatedBuyerLock = Number(buyerLock.amount) - safeBody.data.buyer.amount;
             if (updatedBuyerLock === 0) {
                 yield tx.lock.delete({
@@ -153,7 +152,7 @@ app.post("/wallet/settle", (req, res) => __awaiter(void 0, void 0, void 0, funct
                     },
                 });
             }
-            // releasing the  seller lock
+            // release the  seller lock
             const updatedSellerLock = Number(sellerLock.amount) - safeBody.data.seller.amount;
             if (updatedSellerLock === 0) {
                 yield tx.lock.delete({
@@ -263,6 +262,7 @@ app.post("/wallet/lock", (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
     try {
         yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            yield tx.$executeRaw `SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
             const ledger = yield tx.ledger.findMany({
                 where: {
                     userId: safeBody.data.userId,
@@ -327,6 +327,7 @@ app.post("/wallet/debit", (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
     try {
         yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            yield tx.$executeRaw `SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
             const ledger = yield tx.ledger.findMany({
                 where: {
                     userId: safeBody.data.userId,
@@ -468,9 +469,11 @@ app.get("/wallet/balance/:userId", (req, res) => __awaiter(void 0, void 0, void 
         balances[r].available = balances[r].total - balances[r].locked;
     }
     console.log(balances);
-    const totalLocked = lock.reduce((sum, rec) => sum + Number(rec.amount), 0);
-    const availableBalance = totalBalance - Number(totalLocked);
-    res.json({ availableBalance: availableBalance });
+    res.json(balances);
+}));
+app.get("/markets", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const markets = Object.assign({}, client_1.Asset);
+    res.json({ markets });
 }));
 app.listen(PORT, () => {
     console.log(`The server is running on http://localhost:${PORT}`);
