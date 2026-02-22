@@ -1,9 +1,7 @@
 import { auth } from "@/auth";
+import { Chart } from "@/components/Chart";
 import { Dashboard } from "@/components/Dashboard";
 import { Landing } from "@/components/Landing";
-import SignIn from "@/components/sign-in";
-import axios from "axios";
-import { cookies } from "next/headers";
 
 export default async function Home() {
   const session = await auth();
@@ -13,8 +11,10 @@ export default async function Home() {
     )
   } else {
     console.log(session.user.id)
-    return (
+    return (<div>
     <Dashboard session={session} />
+    <Chart />
+    </div>
   )
   }
 }
