@@ -15,6 +15,16 @@ type LockResponse = {
   lockRef: string;
 };
 
+type CandleStickType = {
+  bucket: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
+const CandleStick: Map<Markets, CandleStickType[]> = new Map();
+
 enum Markets {
   "BTC/USDT" = "BTC/USDT",
   "ETH/USDT" = "ETH/USDT",
@@ -84,7 +94,7 @@ app.post("/order", async (req, res) => {
   try {
     const lock = await axios.post(
       "http://localhost:3001/wallet/lock",
-      lockBody
+      lockBody,
     );
     const lockData = lock.data as LockResponse;
 
@@ -151,8 +161,32 @@ app.post("/order", async (req, res) => {
       }
 
       console.log(
-        `TRADE:${bestBuy.market} ${tradeQty} @ ${tradePrice} (${bestBuy.userId} buys from ${bestSell.userId})`
+        `TRADE:${bestBuy.market} ${tradeQty} @ ${tradePrice} (${bestBuy.userId} buys from ${bestSell.userId})`,
       );
+
+      if (!CandleStick.has(bestBuy.market)) CandleStick.set(bestBuy.market, []);
+
+      const date = new Date().getTime();
+      const bucket = Math.floor(date / 60000) * 60000;
+
+      const candles = CandleStick.get(bestBuy.market)!;
+      const lastCandle =
+        candles.length != 0 ? candles[candles.length - 1] : null;
+
+      if (lastCandle && lastCandle.bucket == bucket) {
+        lastCandle.high = Math.max(lastCandle.high, tradePrice);
+        lastCandle.low = Math.min(lastCandle.low, tradePrice);
+        lastCandle.close = tradePrice;
+      } else {
+        candles.push({
+          bucket,
+          open: tradePrice,
+          high: tradePrice,
+          low: tradePrice,
+          close: tradePrice,
+        });
+      }
+
       bestBuy.remainingQty -= tradeQty;
       bestSell.remainingQty -= tradeQty;
 
@@ -226,6 +260,12 @@ app.get("/markets/:symbol", async (req, res) => {
   const sells = smallOrderBook.get("sells")!.slice(0, 20);
 
   return res.json({ buys, sells });
+});
+
+app.get("/ohlc/:symbol", async (req, res) => {
+  const symbol = req.params.symbol;
+  const market = symbol.replace("_", "/") as Markets;
+  res.json({ candles: CandleStick.get(market) });
 });
 
 app.listen(PORT, () => {
