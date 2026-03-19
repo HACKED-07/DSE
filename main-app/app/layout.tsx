@@ -33,14 +33,7 @@ export default function RootLayout({
       <body
         className={`${geistInter.variable} ${geistMono.variable} antialiased bg-zinc-50 text-zinc-900`}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="white"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        {children}
       </body>
     </html>
   );

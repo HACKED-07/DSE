@@ -6,6 +6,7 @@ import { Asset, Prisma, Reason } from "./src/generated/prisma/client";
 import { z } from "zod";
 import crypto from "crypto";
 import cors from "cors";
+import { consumer } from "./consumer";
 
 const app = express();
 const PORT = 3001;
@@ -125,7 +126,7 @@ app.post("/wallet/settle", async (req, res) => {
           ref: safeBody.data.ref,
         },
       });
-    
+
       // release the buyer lock
       const updatedBuyerLock =
         Number(buyerLock.amount) - safeBody.data.buyer.amount;
@@ -261,26 +262,32 @@ app.post("/wallet/lock", async (req, res) => {
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
-      const ledger = await tx.ledger.findMany({
+
+      // 1. Calculate Total Ledger Balance (SUM in DB)
+      const ledgerRes = await tx.ledger.aggregate({
         where: {
           userId: safeBody.data.userId,
           asset: safeBody.data.asset,
         },
+        _sum: { id: true }, // We can't sum String fields in Prisma easily without raw SQL
       });
-      const totalBalance = ledger.reduce(
-        (sum, rec) => sum + Number(rec.change),
-        0
-      );
-      const lock = await tx.lock.findMany({
-        where: {
-          userId: safeBody.data.userId,
-          asset: safeBody.data.asset,
-        },
-      });
-      const lockedBalance = lock.reduce(
-        (sum, rec) => sum + Number(rec.amount),
-        0
-      );
+
+      // Since 'change' is String, we use raw SQL for precision and speed
+      const [{ sum: totalBalanceStr }] = await tx.$queryRaw<any[]>`
+        SELECT SUM(CAST(change AS DECIMAL)) as sum 
+        FROM "wallet"."Ledger" 
+        WHERE "userId" = ${safeBody.data.userId} AND "asset" = ${safeBody.data.asset}::"wallet"."Asset"
+      `;
+      const totalBalance = Number(totalBalanceStr || 0);
+
+      // 2. Calculate Locked Balance (SUM in DB)
+      const [{ sum: lockedBalanceStr }] = await tx.$queryRaw<any[]>`
+        SELECT SUM(CAST(amount AS DECIMAL)) as sum 
+        FROM "wallet"."Lock" 
+        WHERE "userId" = ${safeBody.data.userId} AND "asset" = ${safeBody.data.asset}::"wallet"."Asset"
+      `;
+      const lockedBalance = Number(lockedBalanceStr || 0);
+
       const availableBalance = totalBalance - lockedBalance;
       if (safeBody.data.amount > availableBalance) {
         throw new Error(insufficient_funds);
@@ -335,27 +342,21 @@ app.post("/wallet/debit", async (req, res) => {
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${safeBody.data.userId});`;
-      const ledger = await tx.ledger.findMany({
-        where: {
-          userId: safeBody.data.userId,
-          asset: safeBody.data.asset,
-        },
-      });
 
-      const totalBalance = ledger.reduce(
-        (sum, rec) => sum + Number(rec.change),
-        0
-      );
-      const lock = await tx.lock.findMany({
-        where: {
-          userId: safeBody.data.userId,
-          asset: safeBody.data.asset,
-        },
-      });
-      const lockedBalance = lock.reduce(
-        (sum, rec) => sum + Number(rec.amount),
-        0
-      );
+      const [{ sum: totalBalanceStr }] = await tx.$queryRaw<any[]>`
+        SELECT SUM(CAST(change AS DECIMAL)) as sum 
+        FROM "wallet"."Ledger" 
+        WHERE "userId" = ${safeBody.data.userId} AND "asset" = ${safeBody.data.asset}::"wallet"."Asset"
+      `;
+      const totalBalance = Number(totalBalanceStr || 0);
+
+      const [{ sum: lockedBalanceStr }] = await tx.$queryRaw<any[]>`
+        SELECT SUM(CAST(amount AS DECIMAL)) as sum 
+        FROM "wallet"."Lock" 
+        WHERE "userId" = ${safeBody.data.userId} AND "asset" = ${safeBody.data.asset}::"wallet"."Asset"
+      `;
+      const lockedBalance = Number(lockedBalanceStr || 0);
+
       const availableBalance = totalBalance - lockedBalance;
       if (safeBody.data.amount > availableBalance) {
         throw new Error(insufficient_funds);
@@ -437,62 +438,174 @@ app.get("/wallet/balance/:userId", async (req, res) => {
     });
   }
   try {
-    ledger = await prisma.ledger.findMany({
-      where: {
-        userId: userId,
-      },
-    });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError) {
-      return res.status(400).json({
-        err: "No user found",
-        message: e.message,
-      });
-    }
-    return res.status(500).json({
-      err: "Internal server error",
-    });
-  }
-  const balances: Record<
-    string,
-    {
-      total: number;
-      locked: number;
-      available: number;
-    }
-  > = {};
-  for (const r of ledger) {
-    const asset = r.asset;
-    if (!balances[asset]) {
-      balances[asset] = { total: 0, locked: 0, available: 0 };
-    }
-    balances[asset].total += Number(r.change);
-  }
+    const ledgerSums = await prisma.$queryRaw<any[]>`
+      SELECT asset, SUM(CAST(change AS DECIMAL)) as sum 
+      FROM "wallet"."Ledger" 
+      WHERE "userId" = ${userId}
+      GROUP BY asset
+    `;
 
-  const totalBalance = ledger.reduce((sum, rec) => sum + Number(rec.change), 0);
-  const lock = await prisma.lock.findMany({
-    where: {
-      userId: userId,
-    },
-  });
-  for (const r of lock) {
-    const asset = r.asset;
-    if (!balances[asset]) {
-      balances[asset] = {
-        total: 0,
+    const lockSums = await prisma.$queryRaw<any[]>`
+      SELECT asset, SUM(CAST(amount AS DECIMAL)) as sum 
+      FROM "wallet"."Lock" 
+      WHERE "userId" = ${userId}
+      GROUP BY asset
+    `;
+
+    const balances: Record<
+      string,
+      { total: number; locked: number; available: number }
+    > = {};
+
+    ledgerSums.forEach((r) => {
+      balances[r.asset] = {
+        total: Number(r.sum),
         locked: 0,
-        available: 0,
+        available: Number(r.sum),
       };
-    }
-    balances[asset].locked += Number(r.amount);
+    });
+
+    lockSums.forEach((r) => {
+      if (!balances[r.asset]) {
+        balances[r.asset] = {
+          total: 0,
+          locked: Number(r.sum),
+          available: -Number(r.sum),
+        };
+      } else {
+        balances[r.asset].locked = Number(r.sum);
+        balances[r.asset].available = balances[r.asset].total - Number(r.sum);
+      }
+    });
+
+    console.log(balances);
+    res.json(balances);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ err: "Internal server error" });
   }
-  for (const r in balances) {
-    balances[r].available = balances[r].total - balances[r].locked;
-  }
-  console.log(balances);
-  res.json(balances);
 });
 
-app.listen(PORT, () => {
+export const startBackgroundSettler = async () => {
+  await consumer.connect();
+  await consumer.subscribe({ topic: "trade.settlement", fromBeginning: false });
+
+  await consumer.run({
+    eachMessage: async ({ message }) => {
+      if (!message.value) return;
+
+      const settlementData = JSON.parse(message.value.toString());
+      const ref = settlementData.ref;
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          // check if trade has already been executed
+          const trade = await tx.ledger.findFirst({
+            where: { ref },
+          });
+
+          if (trade) {
+            console.log(`Trade ${ref} already settled, skipping.`);
+            return;
+          }
+
+          const { buyer, seller } = settlementData;
+
+          // check if the buyer lock exists
+          const buyerLock = await tx.lock.findUnique({
+            where: { ref: buyer.ref },
+          });
+
+          if (!buyerLock || Number(buyerLock.amount) < buyer.amount) {
+            throw new Error(`Invalid buyer lock: ${buyer.ref}`);
+          }
+
+          // check if the seller lock exists
+          const sellerLock = await tx.lock.findUnique({
+            where: { ref: seller.ref },
+          });
+
+          if (!sellerLock || Number(sellerLock.amount) < seller.amount) {
+            throw new Error(`Invalid seller lock: ${seller.ref}`);
+          }
+
+          // 1. Debit Seller
+          await tx.ledger.create({
+            data: {
+              userId: seller.id,
+              asset: seller.asset,
+              change: `-${seller.amount}`,
+              reason: Reason.TRADE,
+              ref: seller.ref,
+            },
+          });
+
+          // 2. Debit Buyer
+          await tx.ledger.create({
+            data: {
+              userId: buyer.id,
+              asset: buyer.asset,
+              change: `-${buyer.amount}`,
+              reason: Reason.TRADE,
+              ref: buyer.ref,
+            },
+          });
+
+          // 3. Credit Seller (Buyer's Asset)
+          await tx.ledger.create({
+            data: {
+              userId: seller.id,
+              asset: buyer.asset,
+              change: `${buyer.amount}`,
+              reason: Reason.TRADE,
+              ref: ref,
+            },
+          });
+
+          // 4. Credit Buyer (Seller's Asset)
+          await tx.ledger.create({
+            data: {
+              userId: buyer.id,
+              asset: seller.asset,
+              change: `${seller.amount}`,
+              reason: Reason.TRADE,
+              ref: ref,
+            },
+          });
+
+          // Update/Delete Buyer Lock
+          const updatedBuyerAmount = Number(buyerLock.amount) - buyer.amount;
+          if (updatedBuyerAmount <= 0) {
+            await tx.lock.delete({ where: { ref: buyer.ref } });
+          } else {
+            await tx.lock.update({
+              where: { ref: buyer.ref },
+              data: { amount: String(updatedBuyerAmount) },
+            });
+          }
+
+          // Update/Delete Seller Lock
+          const updatedSellerAmount = Number(sellerLock.amount) - seller.amount;
+          if (updatedSellerAmount <= 0) {
+            await tx.lock.delete({ where: { ref: seller.ref } });
+          } else {
+            await tx.lock.update({
+              where: { ref: seller.ref },
+              data: { amount: String(updatedSellerAmount) },
+            });
+          }
+        });
+
+        console.log(`Successfully settled trade: ${ref}`);
+      } catch (e: any) {
+        console.error(`Failed to settle trade ${ref}:`, e.message);
+      }
+    },
+  });
+};
+
+app.listen(PORT, async () => {
   console.log(`The server is running on http://localhost:${PORT}`);
+  await startBackgroundSettler();
+  console.log("Background settler started");
 });

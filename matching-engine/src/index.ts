@@ -3,6 +3,7 @@ import axios from "axios";
 import { z } from "zod";
 import crypto from "crypto";
 import cors from "cors";
+import { producer } from "./producer";
 
 const app = express();
 
@@ -140,20 +141,43 @@ app.post("/order", async (req, res) => {
         bestBuy.timestamp < bestSell.timestamp ? bestBuy.price : bestSell.price;
 
       try {
-        await axios.post("http://localhost:3001/wallet/settle", {
+        // await axios.post("http://localhost:3001/wallet/settle", {
+        //   buyer: {
+        //     id: bestBuy.userId,
+        //     amount: tradePrice * tradeQty,
+        //     asset: bestBuy.market.split("/")[1],
+        //     ref: bestBuy.orderId,
+        //   },
+        //   seller: {
+        //     id: bestSell.userId,
+        //     amount: tradeQty,
+        //     asset: bestSell.market.split("/")[0],
+        //     ref: bestSell.orderId,
+        //   },
+        //   ref: "trade_" + crypto.randomUUID(),
+        // });
+        const stringValue = JSON.stringify({
           buyer: {
             id: bestBuy.userId,
             amount: tradePrice * tradeQty,
-            asset: bestBuy.market.split("/")[1],
+            asset: "USDT",
             ref: bestBuy.orderId,
           },
           seller: {
             id: bestSell.userId,
             amount: tradeQty,
-            asset: bestSell.market.split("/")[0],
+            asset: "BTC",
             ref: bestSell.orderId,
           },
           ref: "trade_" + crypto.randomUUID(),
+        });
+        await producer.send({
+          topic: "trade.settlement",
+          messages: [
+            {
+              value: stringValue,
+            },
+          ],
         });
       } catch (e) {
         console.error("settle failed: ", e);
@@ -268,6 +292,8 @@ app.get("/ohlc/:symbol", async (req, res) => {
   res.json({ candles: CandleStick.get(market) });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`The server is running on http://localhost:${PORT}`);
+  await producer.connect();
+  console.log("Kafka Producer connected successfully");
 });
