@@ -4,8 +4,17 @@ import { z } from "zod";
 import crypto from "crypto";
 import cors from "cors";
 import { producer } from "./producer";
+import { Server } from "socket.io";
+import http from "http";
 
 const app = express();
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
 
 app.use(express.json());
 app.use(cors());
@@ -33,6 +42,13 @@ enum Markets {
   "DIDE/USDT" = "DIDE/USDT",
 }
 
+const SUPPORTED_MARKETS: Markets[] = [
+  Markets["BTC/USDT"],
+  Markets["ETH/USDT"],
+  Markets["DOGE/USDT"],
+  Markets["DIDE/USDT"],
+];
+
 type Order = {
   orderId: string;
   userId: number;
@@ -58,6 +74,14 @@ initMarket(Markets["BTC/USDT"]);
 initMarket(Markets["ETH/USDT"]);
 initMarket(Markets["DOGE/USDT"]);
 initMarket(Markets["DIDE/USDT"]);
+
+const doesOrderCross = (incoming: Order, resting: Order) => {
+  if (incoming.orderType === "BUY") {
+    return incoming.price >= resting.price;
+  }
+
+  return incoming.price <= resting.price;
+};
 
 app.post("/order", async (req, res) => {
   const body = req.body;
@@ -111,6 +135,25 @@ app.post("/order", async (req, res) => {
     };
 
     const marketBook = ORDERBOOK.get(safeOrder.data.market)!;
+    const oppositeSide = newOrder.orderType === "BUY" ? "sells" : "buys";
+    const conflictingOwnOrder = marketBook
+      .get(oppositeSide)!
+      .find(
+        (restingOrder) =>
+          restingOrder.userId === newOrder.userId &&
+          doesOrderCross(newOrder, restingOrder),
+      );
+
+    if (conflictingOwnOrder) {
+      await axios.post("http://localhost:3001/wallet/release", {
+        userId: newOrder.userId,
+        orderId: newOrder.orderId,
+      });
+
+      return res.status(409).json({
+        err: "Self-trade prevention blocked the order",
+      });
+    }
 
     if (newOrder.orderType === "BUY") {
       marketBook.get("buys")!.push(newOrder);
@@ -124,12 +167,23 @@ app.post("/order", async (req, res) => {
         .sort((a, b) => a.price - b.price || a.timestamp - b.timestamp);
     }
 
+    onUpdate(
+      newOrder.market,
+      newOrder.orderType === "BUY" ? "buys" : "sells",
+      newOrder.price,
+      newOrder.remainingQty,
+    );
+
     const buys = marketBook.get("buys")!;
     const sells = marketBook.get("sells")!;
 
     while (buys.length > 0 && sells.length > 0) {
       const bestBuy = buys[0];
       const bestSell = sells[0];
+
+      if (bestBuy.userId === bestSell.userId) {
+        break;
+      }
 
       if (bestBuy.price < bestSell.price) {
         break;
@@ -141,32 +195,18 @@ app.post("/order", async (req, res) => {
         bestBuy.timestamp < bestSell.timestamp ? bestBuy.price : bestSell.price;
 
       try {
-        // await axios.post("http://localhost:3001/wallet/settle", {
-        //   buyer: {
-        //     id: bestBuy.userId,
-        //     amount: tradePrice * tradeQty,
-        //     asset: bestBuy.market.split("/")[1],
-        //     ref: bestBuy.orderId,
-        //   },
-        //   seller: {
-        //     id: bestSell.userId,
-        //     amount: tradeQty,
-        //     asset: bestSell.market.split("/")[0],
-        //     ref: bestSell.orderId,
-        //   },
-        //   ref: "trade_" + crypto.randomUUID(),
-        // });
+        const [baseAsset, quoteAsset] = bestBuy.market.split("/");
         const stringValue = JSON.stringify({
           buyer: {
             id: bestBuy.userId,
             amount: tradePrice * tradeQty,
-            asset: "USDT",
+            asset: quoteAsset,
             ref: bestBuy.orderId,
           },
           seller: {
             id: bestSell.userId,
             amount: tradeQty,
-            asset: "BTC",
+            asset: baseAsset,
             ref: bestSell.orderId,
           },
           ref: "trade_" + crypto.randomUUID(),
@@ -214,11 +254,17 @@ app.post("/order", async (req, res) => {
       bestBuy.remainingQty -= tradeQty;
       bestSell.remainingQty -= tradeQty;
 
+      onUpdate(bestBuy.market, "buys", bestBuy.price, bestBuy.remainingQty);
+      onUpdate(bestSell.market, "sells", bestSell.price, bestSell.remainingQty);
+
       if (bestBuy.remainingQty === 0) buys.shift();
       if (bestSell.remainingQty === 0) sells.shift();
     }
 
-    return res.json({ success: "Successfully order placed" });
+    return res.json({
+      success: "Successfully order placed",
+      orderId: newOrder.orderId,
+    });
   } catch (e) {
     return res
       .status(400)
@@ -259,6 +305,13 @@ app.post("/cancel", async (req, res) => {
     return res.status(400).json({ err: "Order not found or already filled" });
   }
 
+  onUpdate(
+    canceledOrder.market,
+    canceledOrder.orderType === "BUY" ? "buys" : "sells",
+    canceledOrder.price,
+    0,
+  );
+
   try {
     await axios.post("http://localhost:3001/wallet/release", {
       userId: safeBody.data.userId,
@@ -286,13 +339,117 @@ app.get("/markets/:symbol", async (req, res) => {
   return res.json({ buys, sells });
 });
 
+app.get("/markets", async (_req, res) => {
+  return res.json({
+    markets: SUPPORTED_MARKETS.map((market) => ({
+      market,
+      symbol: market.replace("/", "_"),
+    })),
+  });
+});
+
+app.get("/snapshot/:symbol", async (req, res) => {
+  const symbol = req.params.symbol;
+  const market = symbol.replace("_", "/") as Markets;
+  const book = ORDERBOOK.get(market);
+
+  if (!book) {
+    return res.status(400).json({ err: "No market found for the symbol" });
+  }
+
+  const buys = book.get("buys")!;
+  const sells = book.get("sells")!;
+  const bestBid = buys[0] ?? null;
+  const bestAsk = sells[0] ?? null;
+  const midPrice =
+    bestBid && bestAsk ? (bestBid.price + bestAsk.price) / 2 : null;
+
+  return res.json({
+    market,
+    symbol,
+    bestBid,
+    bestAsk,
+    spread:
+      bestBid && bestAsk ? Number((bestAsk.price - bestBid.price).toFixed(8)) : null,
+    midPrice,
+    depth: {
+      buys: buys.slice(0, 20),
+      sells: sells.slice(0, 20),
+    },
+  });
+});
+
 app.get("/ohlc/:symbol", async (req, res) => {
   const symbol = req.params.symbol;
   const market = symbol.replace("_", "/") as Markets;
   res.json({ candles: CandleStick.get(market) });
 });
 
-app.listen(PORT, async () => {
+const getTop20Levels = (market: Markets) => {
+  const buys = ORDERBOOK.get(market)?.get("buys");
+  const sells = ORDERBOOK.get(market)?.get("sells");
+  return { buys, sells };
+};
+
+const buffers: Map<
+  Markets,
+  {
+    buys: Map<number, number>;
+    sells: Map<number, number>;
+  }
+> = new Map();
+
+const initBuffer = (market: Markets) => {
+  buffers.set(market, {
+    buys: new Map(),
+    sells: new Map(),
+  });
+};
+
+initBuffer(Markets["BTC/USDT"]);
+initBuffer(Markets["ETH/USDT"]);
+initBuffer(Markets["DOGE/USDT"]);
+initBuffer(Markets["DIDE/USDT"]);
+
+function onUpdate(
+  market: Markets,
+  side: "buys" | "sells",
+  price: number,
+  qty: number,
+) {
+  buffers.get(market)![side].set(price, qty);
+}
+
+setInterval(() => {
+  for (const [market, { buys, sells }] of buffers.entries()) {
+    const changes: [string, number, number][] = [];
+
+    for (const [price, qty] of buys) {
+      changes.push(["buy", price, qty]);
+    }
+    for (const [price, qty] of sells) {
+      changes.push(["sell", price, qty]);
+    }
+
+    if (changes.length > 0) {
+      io.to(market).emit("update", { changes });
+    }
+
+    buffers.set(market, {
+      buys: new Map(),
+      sells: new Map(),
+    });
+  }
+}, 1000);
+
+io.on("connection", (socket) => {
+  socket.on("subscribe", (market: Markets) => {
+    console.log("subscribed: ", market);
+    socket.join(market);
+  });
+});
+
+server.listen(PORT, async () => {
   console.log(`The server is running on http://localhost:${PORT}`);
   await producer.connect();
   console.log("Kafka Producer connected successfully");

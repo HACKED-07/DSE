@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsc -b && node dist/index.js"
+    "dev": "tsc -b && node dist/index.js",
+    "maker-bot": "tsc -b && node dist/makerBot.js",
+    "taker-bot": "tsc -b && node dist/takerBot.js"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +21,7 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "kafkajs": "^2.2.4",
+    "socket.io": "^4.8.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {
