@@ -207,3 +207,59 @@ curl -X POST http://localhost:3002/cancel \
 * No frontend
 
 These were intentionally excluded to isolate **core financial correctness**.
+
+---
+
+## Demo Liquidity Bots
+
+The matching engine now includes two dedicated bot entrypoints:
+
+* [matching-engine/src/makerBot.ts](/Users/hrishikeshpatel/Desktop/Folder/projects/DSE/matching-engine/src/makerBot.ts)
+* [matching-engine/src/takerBot.ts](/Users/hrishikeshpatel/Desktop/Folder/projects/DSE/matching-engine/src/takerBot.ts)
+
+What they do:
+
+* the maker bot continuously refreshes multi-level passive quotes across all markets
+* the taker bot continuously and randomly crosses liquidity from a small depth window
+* by default the taker bot targets the maker bot's quotes, so fills occur without self-trading
+
+Run them in separate terminals:
+
+```bash
+cd matching-engine
+MAKER_USER_ID=9001 MAKER_BOOTSTRAP=true npm run maker-bot
+```
+
+```bash
+cd matching-engine
+TAKER_USER_ID=9101 MAKER_USER_ID=9001 TAKER_BOOTSTRAP=true npm run taker-bot
+```
+
+Useful maker environment variables:
+
+* `MAKER_USER_ID` maker account id, default `9001`
+* `MAKER_BOOTSTRAP=true` auto-funds the maker through the wallet credit endpoint
+* `MAKER_LOOP_MS` quote refresh interval, default `4000`
+* `MAKER_QUOTE_SPREAD_BPS` total maker spread in basis points, default `30`
+* `MAKER_QUOTE_LEVELS` number of maker orders per side, default `4`
+* `MAKER_LEVEL_STEP_BPS` extra basis points between quote levels, default `14`
+* `MAKER_REPRICE_THRESHOLD_BPS` minimum drift before cancel/requote, default `8`
+
+Useful taker environment variables:
+
+* `TAKER_USER_ID` taker account id, default `9101`
+* `TAKER_BOOTSTRAP=true` auto-funds the taker through the wallet credit endpoint
+* `MAKER_USER_ID` maker account id to target, default `9001`
+* `TAKER_LOOP_MS` taker scan interval, default `1800`
+* `TAKER_JITTER_MS` random extra delay before a taker action, default `2200`
+* `TAKER_MATCH_PROBABILITY` chance of a taker action per market cycle, default `0.55`
+* `TAKER_DEPTH_WINDOW` number of top levels the taker can choose from, default `4`
+* `TAKER_ONLY_MAKER` when `true` targets only the maker bot's quotes, default `true`
+
+Bot-facing engine endpoints:
+
+* `GET /markets` lists all supported markets
+* `GET /snapshot/:symbol` returns top-of-book, spread, and depth
+* `POST /order` now returns the created `orderId`
+
+These bots are set up as **demo local exchange participants**. The maker adds laddered liquidity across several prices, and the taker removes liquidity with randomized timing, side selection, and price-level choice. They are not appropriate for real-market deployment without exchange-specific controls, rate limiting, inventory/risk management, and legal/compliance review.

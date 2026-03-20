@@ -7,11 +7,6 @@ export default async function Home() {
   if (!session?.user) {
     return <Landing />;
   } else {
-    console.log(session.user.id);
-    return (
-      <div>
-        <Dashboard session={session} />
-      </div>
-    );
+    return <Dashboard session={session} />;
   }
 }
