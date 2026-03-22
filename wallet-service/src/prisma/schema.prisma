@@ -32,7 +32,7 @@ enum Reason {
 
 model Ledger{
   id Int @id @default(autoincrement())
-  userId Int
+  userId String
   asset Asset
   change String
   reason Reason
@@ -46,7 +46,7 @@ model Ledger{
 
 model Lock {
   id Int @id @default(autoincrement())
-  userId Int
+  userId String
   asset Asset
   amount String
   ref String @unique

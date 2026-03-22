@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const match = await matchPass(safeBody.data.password, user?.passwordHash);
+  const match = await matchPass(safeBody.data.password, user?.passwordHash as string);
   if (!match) {
     return Response.json(
       {

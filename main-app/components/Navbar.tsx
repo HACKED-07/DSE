@@ -1,11 +1,11 @@
+
 import Link from "next/link";
-import {
-  Menu,
-} from "lucide-react";
+import { Menu } from "lucide-react";
 import SignIn from "./sign-in";
 import { SignOut } from "./signout-button";
 import { Button } from "./ui/button";
 import { DEFAULT_MARKET_SYMBOL } from "@/lib/markets";
+import { DepositModal } from "./DepositModal";
 
 const NAV_ITEMS = [
   { label: "Buy Crypto", href: "/" },
@@ -57,11 +57,7 @@ export const Navbar = ({ isSignedIn, userLabel }: NavbarProps) => {
         <div className="flex items-center gap-2">
           {isSignedIn ? (
             <div className="hidden items-center gap-2 sm:flex">
-              <Link href="/market/BTC_USDT">
-                <Button className="rounded-xl bg-[#f0b90b] px-5 font-semibold text-zinc-950 hover:bg-[#ddb02d]">
-                  Deposit
-                </Button>
-              </Link>
+              <DepositModal />
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-700">
                 {userLabel ?? "Signed in"}
               </div>

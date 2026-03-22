@@ -362,8 +362,16 @@ export function OrderBook({
       setIsLive(false);
     });
 
+    const onForcedResync = (event: Event) => {
+      const customEvent = event as CustomEvent<{ symbol?: string }>;
+      if (!customEvent.detail?.symbol || customEvent.detail.symbol === symbol) {
+        void loadSnapshot();
+      }
+    };
+
     loadSnapshot();
     scheduleResync();
+    window.addEventListener("orderbook:resync", onForcedResync);
 
     return () => {
       cancelled = true;
@@ -378,6 +386,7 @@ export function OrderBook({
 
       socket.disconnect();
       socketRef.current = null;
+      window.removeEventListener("orderbook:resync", onForcedResync);
     };
   }, [symbol]);
 

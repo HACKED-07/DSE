@@ -13,8 +13,8 @@ import {
   type MarketConfig,
 } from "./bot-utils";
 
-const TAKER_USER_ID = Number(process.env.TAKER_USER_ID ?? 9101);
-const MAKER_USER_ID = Number(process.env.MAKER_USER_ID ?? 9001);
+const TAKER_USER_ID = process.env.TAKER_USER_ID ?? "9101";
+const MAKER_USER_ID = process.env.MAKER_USER_ID ?? "9001";
 const LOOP_MS = Number(process.env.TAKER_LOOP_MS ?? 1800);
 const MATCH_PROBABILITY = Number(process.env.TAKER_MATCH_PROBABILITY ?? 0.55);
 const JITTER_MS = Number(process.env.TAKER_JITTER_MS ?? 2200);

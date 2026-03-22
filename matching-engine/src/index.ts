@@ -51,7 +51,7 @@ const SUPPORTED_MARKETS: Markets[] = [
 
 type Order = {
   orderId: string;
-  userId: number;
+  userId: string;
   price: number;
   originalQty: number;
   remainingQty: number;
@@ -63,6 +63,18 @@ type Order = {
 type OrderBook = Map<Markets, Map<"buys" | "sells", Order[]>>;
 
 const ORDERBOOK: OrderBook = new Map();
+
+const getSideOrders = (market: Markets, side: "buys" | "sells") =>
+  ORDERBOOK.get(market)?.get(side) ?? [];
+
+const getLevelQty = (
+  market: Markets,
+  side: "buys" | "sells",
+  price: number,
+) =>
+  getSideOrders(market, side)
+    .filter((order) => order.price === price)
+    .reduce((sum, order) => sum + order.remainingQty, 0);
 
 const initMarket = (market: Markets) => {
   ORDERBOOK.set(market, new Map());
@@ -87,7 +99,7 @@ app.post("/order", async (req, res) => {
   const body = req.body;
   const orderId = crypto.randomUUID();
   const OrderSchema = z.object({
-    userId: z.number(),
+    userId: z.string(),
     price: z.number(),
     qty: z.number(),
     orderType: z.enum(["BUY", "SELL"]),
@@ -171,7 +183,6 @@ app.post("/order", async (req, res) => {
       newOrder.market,
       newOrder.orderType === "BUY" ? "buys" : "sells",
       newOrder.price,
-      newOrder.remainingQty,
     );
 
     const buys = marketBook.get("buys")!;
@@ -254,11 +265,11 @@ app.post("/order", async (req, res) => {
       bestBuy.remainingQty -= tradeQty;
       bestSell.remainingQty -= tradeQty;
 
-      onUpdate(bestBuy.market, "buys", bestBuy.price, bestBuy.remainingQty);
-      onUpdate(bestSell.market, "sells", bestSell.price, bestSell.remainingQty);
-
       if (bestBuy.remainingQty === 0) buys.shift();
       if (bestSell.remainingQty === 0) sells.shift();
+
+      onUpdate(bestBuy.market, "buys", bestBuy.price);
+      onUpdate(bestSell.market, "sells", bestSell.price);
     }
 
     return res.json({
@@ -266,6 +277,19 @@ app.post("/order", async (req, res) => {
       orderId: newOrder.orderId,
     });
   } catch (e) {
+    if (typeof e === "object" && e !== null && "response" in e) {
+      const walletError = e as {
+        response?: { status?: number; data?: unknown };
+        message?: string;
+      };
+      console.error(
+        "wallet service rejected order:",
+        walletError.response?.status,
+        walletError.response?.data ?? walletError.message,
+      );
+    } else {
+      console.error("wallet service request failed:", e);
+    }
     return res
       .status(400)
       .json({ err: "error communicating with wallet service" });
@@ -276,7 +300,7 @@ app.post("/cancel", async (req, res) => {
   const body = req.body;
   const CancelSchema = z.object({
     orderId: z.string(),
-    userId: z.number(),
+    userId: z.string(),
     market: z.enum(Markets),
   });
 
@@ -309,7 +333,6 @@ app.post("/cancel", async (req, res) => {
     canceledOrder.market,
     canceledOrder.orderType === "BUY" ? "buys" : "sells",
     canceledOrder.price,
-    0,
   );
 
   try {
@@ -415,8 +438,8 @@ function onUpdate(
   market: Markets,
   side: "buys" | "sells",
   price: number,
-  qty: number,
 ) {
+  const qty = getLevelQty(market, side, price);
   buffers.get(market)![side].set(price, qty);
 }
 

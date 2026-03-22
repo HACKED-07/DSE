@@ -29,7 +29,7 @@ type MarketQuoteState = {
   lastSellSkipReason: string | null;
 };
 
-const MAKER_USER_ID = Number(process.env.MAKER_USER_ID ?? 9001);
+const MAKER_USER_ID = process.env.MAKER_USER_ID ?? "9001";
 const LOOP_MS = Number(process.env.MAKER_LOOP_MS ?? 4000);
 const QUOTE_SPREAD_BPS = Number(process.env.MAKER_QUOTE_SPREAD_BPS ?? 30);
 const QUOTE_LEVELS = Number(process.env.MAKER_QUOTE_LEVELS ?? 4);

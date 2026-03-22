@@ -4,7 +4,7 @@ export type Side = "BUY" | "SELL";
 
 export type Order = {
   orderId: string;
-  userId: number;
+  userId: string;
   price: number;
   originalQty: number;
   remainingQty: number;
@@ -134,12 +134,12 @@ export async function fetchSnapshot(symbol: string) {
   return response.data;
 }
 
-export async function fetchBalances(userId: number) {
+export async function fetchBalances(userId: string) {
   const response = await axios.get<Balances>(`${WALLET_URL}/wallet/balance/${userId}`);
   return response.data;
 }
 
-export async function creditAsset(userId: number, asset: string, amount: number) {
+export async function creditAsset(userId: string, asset: string, amount: number) {
   await axios.post(`${WALLET_URL}/wallet/credit`, {
     userId,
     asset,
@@ -149,7 +149,7 @@ export async function creditAsset(userId: number, asset: string, amount: number)
 }
 
 export async function submitOrder(
-  userId: number,
+  userId: string,
   actorLabel: string,
   market: string,
   side: Side,
@@ -184,7 +184,7 @@ export async function submitOrder(
 }
 
 export async function cancelOrder(
-  userId: number,
+  userId: string,
   actorLabel: string,
   orderId: string,
   market: string,

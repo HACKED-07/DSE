@@ -3,7 +3,7 @@ import { LiveMarketStats } from "@/components/LiveMarketStats";
 import { OrderBook } from "@/components/orderBook";
 import { notFound } from "next/navigation";
 import { Markets } from "./markets";
-import { PlaceOrderButton } from "@/components/placeorder-button";
+import { TradeForm } from "@/components/TradeForm";
 import { getMarketBySymbol, isValidMarketSymbol } from "@/lib/markets";
 import { getMarketStats } from "@/lib/market-data";
 
@@ -42,7 +42,7 @@ export default async function Page({
       <Markets />
 
       <div className="space-y-6">
-        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(240,185,11,0.18),_transparent_34%),linear-gradient(180deg,_#ffffff_0%,_#f8fafc_100%)] p-6 text-zinc-950 shadow-[0_28px_80px_-48px_rgba(15,23,42,0.25)]">
+        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,rgba(240,185,11,0.18),transparent_34%),linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-6 text-zinc-950 shadow-[0_28px_80px_-48px_rgba(15,23,42,0.25)]">
           <div className="flex flex-wrap items-start justify-between gap-6">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.32em] text-zinc-500">
@@ -70,8 +70,13 @@ export default async function Page({
         <div className="min-h-0 flex-1">
           <OrderBook initialData={orderBookData} symbol={symbol} />
         </div>
-        <div className="rounded-[2rem] border border-zinc-200 bg-white p-3 shadow-[0_18px_50px_-45px_rgba(15,23,42,0.45)]">
-          <PlaceOrderButton />
+        <div className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-[0_18px_50px_-45px_rgba(15,23,42,0.45)]">
+          <div className="mb-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-zinc-500">
+              Place Order
+            </div>
+          </div>
+          <TradeForm symbol={symbol} />
         </div>
       </div>
     </div>
