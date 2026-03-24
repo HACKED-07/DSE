@@ -28,7 +28,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
-      <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_28px_80px_-48px_rgba(15,23,42,0.45)]">
+      <section className="animate-fade-in-up overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_28px_80px_-48px_rgba(15,23,42,0.45)]">
         <div className="grid gap-10 bg-[radial-gradient(circle_at_top_left,_rgba(240,185,11,0.18),_transparent_34%),linear-gradient(180deg,_#fffdf7_0%,_#ffffff_55%,_#f8fafc_100%)] px-6 py-8 text-zinc-950 md:grid-cols-[1.2fr_0.8fr] md:px-10 md:py-10">
           <div className="space-y-5">
             <div className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-4 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-amber-900">
@@ -47,7 +47,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
               <Button
                 asChild
                 size="lg"
-                className="rounded-xl bg-[#f0b90b] px-6 font-semibold text-zinc-950 hover:bg-[#ddb02d]"
+                className="rounded-xl bg-[#f0b90b] px-6 font-semibold text-zinc-950 shadow-[0_8px_24px_-8px_rgba(240,185,11,0.5)] transition-all duration-200 hover:bg-[#ddb02d] hover:shadow-[0_12px_32px_-8px_rgba(240,185,11,0.6)]"
               >
                 <Link href={`/market/${DEFAULT_MARKET_SYMBOL}`}>
                   Open Trade Desk
@@ -61,7 +61,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
-            <div className="rounded-[1.5rem] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="animate-fade-in-up delay-200 rounded-[1.5rem] border border-zinc-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="mb-3 flex items-center gap-3 text-zinc-500">
                 <CandlestickChart className="size-4" />
                 Trading access
@@ -74,7 +74,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
                 prevents invalid market navigation from the dashboard.
               </div>
             </div>
-            <div className="rounded-[1.5rem] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="animate-fade-in-up delay-300 rounded-[1.5rem] border border-zinc-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="mb-3 flex items-center gap-3 text-zinc-500">
                 <Wallet className="size-4" />
                 Market coverage
@@ -98,7 +98,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
       </section>
 
       <section className="mt-8">
-        <div className="mb-4 flex items-end justify-between gap-4">
+        <div className="animate-fade-in-up delay-200 mb-4 flex items-end justify-between gap-4">
           <div>
             <div className="text-sm font-semibold uppercase tracking-[0.3em] text-zinc-500">
               Markets
@@ -113,11 +113,12 @@ export const Dashboard = async ({ session }: { session: Session }) => {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {markets.map((market) => (
+          {markets.map((market, index) => (
             <Link
               key={market.symbol}
               href={`/market/${market.symbol}`}
-              className={`group overflow-hidden rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-[0_22px_50px_-42px_rgba(15,23,42,0.45)] transition-transform duration-200 hover:-translate-y-1 ${market.accent}`}
+              className={`animate-fade-in-up group overflow-hidden rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-[0_22px_50px_-42px_rgba(15,23,42,0.45)] transition-all duration-250 hover:-translate-y-1.5 hover:shadow-[0_28px_60px_-35px_rgba(15,23,42,0.5)] ${market.accent}`}
+              style={{ animationDelay: `${300 + index * 100}ms` }}
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -158,7 +159,7 @@ export const Dashboard = async ({ session }: { session: Session }) => {
               </div>
               <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-zinc-950">
                 Trade now
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+                <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-1" />
               </div>
             </Link>
           ))}

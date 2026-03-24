@@ -10,29 +10,29 @@ export const IntroSection = () => {
     <div className="flex min-h-[calc(100vh-5.5rem)] items-center py-10">
       <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 lg:grid-cols-[1fr_0.95fr] lg:items-center">
         <div className="max-w-3xl">
-          <div className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-4 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-amber-700">
+          <div className="animate-fade-in-up inline-flex rounded-full border border-amber-200 bg-amber-50 px-4 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-amber-700">
             Spot Trading UI
           </div>
-          <div className="mt-5 text-6xl font-black tracking-tighter text-zinc-950 md:text-8xl">
+          <div className="animate-fade-in-up delay-100 mt-5 text-6xl font-black tracking-tighter text-zinc-950 md:text-8xl">
             The future of finance is here.
           </div>
-          <div className="mt-5 max-w-2xl text-lg leading-8 text-zinc-600 md:text-xl">
+          <div className="animate-fade-in-up delay-200 mt-5 max-w-2xl text-lg leading-8 text-zinc-600 md:text-xl">
             Buy, sell, and track supported markets on a polished exchange
             interface with valid market routes, live order books, and a focused
             trading workspace.
           </div>
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="animate-fade-in-up delay-300 mt-8 flex flex-wrap gap-3">
             <SignIn
               label="Sign Up"
               variant="default"
               size="lg"
-              className="rounded-xl bg-[#f0b90b] px-6 font-semibold text-zinc-950 hover:bg-[#ddb02d]"
+              className="rounded-xl bg-[#f0b90b] px-6 font-semibold text-zinc-950 shadow-[0_8px_24px_-8px_rgba(240,185,11,0.5)] transition-all duration-200 hover:bg-[#ddb02d] hover:shadow-[0_12px_32px_-8px_rgba(240,185,11,0.6)]"
             />
             <Button
               asChild
               variant="outline"
               size="lg"
-              className="rounded-xl border-zinc-300 bg-white px-6 text-zinc-900 hover:bg-zinc-100"
+              className="rounded-xl border-zinc-300 bg-white px-6 text-zinc-900 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:shadow-md"
             >
               <Link href={`/market/${DEFAULT_MARKET_SYMBOL}`}>
                 Explore Markets
@@ -42,7 +42,7 @@ export const IntroSection = () => {
           </div>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm">
+            <div className="animate-fade-in-up delay-400 rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
                 <Zap className="size-4 text-amber-500" />
                 Live markets
@@ -54,7 +54,7 @@ export const IntroSection = () => {
                 Only supported pairs are shown in navigation.
               </div>
             </div>
-            <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm">
+            <div className="animate-fade-in-up delay-500 rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
                 <ShieldCheck className="size-4 text-emerald-500" />
                 Safer routing
@@ -66,7 +66,7 @@ export const IntroSection = () => {
                 Invalid market links are filtered out at the UI layer.
               </div>
             </div>
-            <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm">
+            <div className="animate-fade-in-up delay-600 rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <div className="text-sm font-semibold text-zinc-700">
                 Default pair
               </div>
@@ -80,7 +80,7 @@ export const IntroSection = () => {
           </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-zinc-200 bg-[radial-gradient(circle_at_top,_rgba(240,185,11,0.18),_transparent_28%),linear-gradient(180deg,_#ffffff_0%,_#f8fafc_100%)] p-4 shadow-[0_35px_80px_-45px_rgba(15,23,42,0.22)]">
+        <div className="animate-fade-in delay-300 relative overflow-hidden rounded-[2.25rem] border border-zinc-200 bg-[radial-gradient(circle_at_top,_rgba(240,185,11,0.18),_transparent_28%),linear-gradient(180deg,_#ffffff_0%,_#f8fafc_100%)] p-4 shadow-[0_35px_80px_-45px_rgba(15,23,42,0.22)] transition-transform duration-300 hover:scale-[1.01]">
           <div className="absolute inset-x-10 top-0 h-30 rounded-full bg-amber-300/20 blur-3xl" />
           <div className="relative rounded-[1.75rem] border border-zinc-200 bg-white/90 p-6 backdrop-blur">
             <div className="mb-5 flex items-center justify-between">
@@ -101,7 +101,7 @@ export const IntroSection = () => {
               {MARKET_PAIRS.map((market) => (
                 <div
                   key={market.symbol}
-                  className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
+                  className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-200 hover:bg-amber-50/40 hover:shadow-sm"
                 >
                   <div className="text-xs font-semibold uppercase tracking-[0.28em] text-zinc-500">
                     {market.name}

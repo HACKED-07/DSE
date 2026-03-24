@@ -100,8 +100,8 @@ app.post("/order", async (req, res) => {
   const orderId = crypto.randomUUID();
   const OrderSchema = z.object({
     userId: z.string(),
-    price: z.number(),
-    qty: z.number(),
+    price: z.number().positive(),
+    qty: z.number().positive(),
     orderType: z.enum(["BUY", "SELL"]),
     market: z.enum(Markets),
   });

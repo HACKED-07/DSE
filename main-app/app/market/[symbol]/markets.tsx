@@ -26,45 +26,39 @@ export const Markets = () => {
         </div>
       </div>
 
-      {MARKET_PAIRS.map((market) => (
-        <MarketsButton
-          key={market.symbol}
-          market={market.baseAsset}
-          onClick={() => changeMarket(market.baseAsset)}
-          variant={active === market.baseAsset ? "default" : "secondary"}
-        />
-      ))}
+      {MARKET_PAIRS.map((market) => {
+        const isActive = active === market.baseAsset;
+        return (
+          <Button
+            key={market.symbol}
+            variant={isActive ? "default" : "secondary"}
+            onClick={() => changeMarket(market.baseAsset)}
+            className={cn(
+              "h-14 justify-start rounded-2xl px-4 text-left font-semibold transition-all duration-200 hover:cursor-pointer",
+              isActive
+                ? "bg-amber-50 text-amber-900 shadow-sm hover:bg-amber-100"
+                : "bg-zinc-50 text-zinc-700 hover:-translate-y-0.5 hover:bg-zinc-100 hover:shadow-sm",
+            )}
+          >
+            <div className="flex w-full items-center gap-3">
+              <span
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full transition-colors",
+                  isActive ? "bg-amber-500" : "bg-zinc-300",
+                )}
+              />
+              <div className="flex flex-col">
+                <span className="text-[13px] font-bold leading-tight">
+                  {market.baseAsset}/{market.quoteAsset}
+                </span>
+                <span className="text-[11px] font-medium leading-tight text-zinc-500">
+                  {market.name}
+                </span>
+              </div>
+            </div>
+          </Button>
+        );
+      })}
     </div>
-  );
-};
-
-export const MarketsButton = ({
-  market,
-  onClick,
-  variant,
-}: {
-  market: string;
-  onClick: () => void;
-  variant?:
-    | "link"
-    | "default"
-    | "destructive"
-    | "outline"
-    | "secondary"
-    | "ghost";
-}) => {
-  return (
-    <Button
-      variant={variant}
-      onClick={onClick}
-      className={cn(
-        "h-12 justify-start rounded-2xl px-4 text-left font-semibold hover:cursor-pointer",
-        variant === "default"
-          ? "bg-amber-50 text-amber-900 hover:bg-amber-100"
-          : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100",
-      )}
-    >
-      {market}
-    </Button>
   );
 };

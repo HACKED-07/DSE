@@ -1,4 +1,4 @@
-import { Prisma } from "@/app/generated/prisma/client";
+
 import prisma from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { z } from "zod";
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   let body;
   try {
     body = await request.json();
-  } catch (err) {
+  } catch {
     return Response.json(
       {
         error: "invalid body",
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
         email: safeBody.data.email,
       },
     });
-  } catch (e) {
+  } catch {
     return Response.json(
       {
         err: "Internal server error",

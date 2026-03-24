@@ -26,7 +26,7 @@ const DebitSchema = z.object({
 
 const LockSchema = z.object({
   userId: z.string(),
-  amount: z.number(),
+  amount: z.number().positive(),
   asset: zodAssets,
   orderId: z.string(),
 });
@@ -59,7 +59,7 @@ export const handleCredit = async (req: Request, res: Response) => {
     const { amount, asset, userId } = safeBody.data;
 
     await creditUser(amount, asset, userId);
-    return res.json({ sucess: "Added credits sucessfully" });
+    return res.json({ success: "Added credits successfully" });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
       return res.status(400).json({ err: e.message });
@@ -77,10 +77,10 @@ export const handleDebit = async (req: Request, res: Response) => {
   try {
     const { amount, asset, userId } = safeBody.data;
     await debitUser(amount, asset, userId);
-    return res.json({ sucecss: "Withdrawal Successful" });
+    return res.json({ success: "Withdrawal successful" });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
-      return res.status(400).json({ err: "Error in withdrawaling" });
+      return res.status(400).json({ err: "Error in withdrawal" });
     }
     if (e instanceof Error && e.message === insufficient_funds) {
       return res.status(400).json({ err: "Insufficient funds" });
@@ -103,7 +103,7 @@ export const handleLock = async (req: Request, res: Response) => {
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return res.status(400).json({ err: "Lock already exits" });
+      return res.status(400).json({ err: "Lock already exists" });
     }
     if (e instanceof Error && e.message === insufficient_funds) {
       return res.status(400).json({ err: "Insufficient Funds" });
@@ -122,7 +122,7 @@ export const handleRelease = async (req: Request, res: Response) => {
     return res.json({ success: "Successfully released" });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
-      return res.status(400).json({ err: "No lock of found for the request" });
+      return res.status(400).json({ err: "No lock found for the request" });
     }
     return res.status(500).json({ err: "Internal server error" });
   }
@@ -146,7 +146,7 @@ export const handleSettle = async (req: Request, res: Response) => {
   const body = req.body;
   const safeBody = SettleSchema.safeParse(body);
   if (!safeBody.success) {
-    return res.json({ err: "Invalid body" });
+    return res.status(400).json({ err: "Invalid body" });
   }
   try {
     const { buyer, seller, ref } = safeBody.data;

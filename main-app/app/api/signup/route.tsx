@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   let body;
   try {
     body = await request.json();
-  } catch (err) {
+  } catch {
     return Response.json(
       {
         error: "invalid body",
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       },
     });
     return Response.json({
-      success: "Account created successfull",
+      success: "Account created successfully",
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError) {

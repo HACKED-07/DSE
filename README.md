@@ -1,50 +1,63 @@
-# Mini Exchange Backend
+# DSE — Decentralized Spot Exchange
 
-A minimal crypto exchange backend designed to demonstrate **correct trade settlement, balance safety, and partial-fill handling**.
+A full-stack crypto exchange built to demonstrate **correct trade settlement, balance safety, partial-fill handling**, and a polished trading UI — all running locally.
 
-This system intentionally avoids UI, persistence, and real networking complexity to focus on **core correctness problems in trading systems**:
-
-* Double-spend prevention
-* Partial fill settlement
-* Atomic balance updates
-* Lock-based fund control
+```
+main-app  ←→  matching-engine  ←→  wallet-service
+ (Next.js)    (Express + WS)       (Express + Prisma)
+                    ↕                      ↕
+                  Kafka  ──────────────→  Kafka
+               (producer)              (consumer)
+```
 
 ---
 
 ## Architecture
 
-Two independent services communicate over HTTP.
+Three independent services communicate over HTTP, WebSockets, and Kafka.
 
-### 1) Matching Engine (port `3002`)
+### 1) Main App — Next.js Frontend (port `3000`)
 
-* Accepts orders
-* Maintains in-memory order books
-* Matches best bid/ask
-* Requests balance locks before accepting orders
-* Calls wallet service to settle matched trades
+* Next.js 16 with App Router and server components
+* **NextAuth v5** with Google OAuth and Prisma adapter
+* Real-time order book via Socket.IO client
+* Candlestick chart powered by `lightweight-charts`
+* Server-side API route proxies inject the authenticated user ID before forwarding to backend services
+* Pages: landing page, authenticated dashboard with live market cards, per-market trading surface
 
-### 2) Wallet Service (port `3001`)
+### 2) Matching Engine (port `3002`)
 
-* Ledger-based accounting (no mutable balances)
+* In-memory order books for 4 markets: `BTC/USDT`, `ETH/USDT`, `DOGE/USDT`, `DIDE/USDT`
+* Price-time priority matching with self-trade prevention
+* **Socket.IO server** broadcasts order book deltas to connected clients
+* Publishes trade settlements to Kafka (`trade.settlement` topic)
+* OHLC candlestick aggregation (1-minute buckets)
+* Snapshot and depth endpoints for server-side rendering
+
+### 3) Wallet Service (port `3001`)
+
+* Ledger-based accounting — no mutable balances
 * Lock table prevents double-spend
-* Atomic settlement using DB transactions
-* Idempotent trade settlement via `ref`
-
-This mirrors how real exchanges split **price discovery** and **fund custody**.
+* Atomic settlement using Prisma transactions with `pg_advisory_xact_lock`
+* **Kafka consumer** processes settlements asynchronously from the matching engine
+* Idempotent trade settlement via unique `ref` values
+* Refactored into routes → controllers → services architecture
+* String user IDs (compatible with NextAuth-generated UUIDs)
 
 ---
 
 ## Trade Lifecycle
 
-1. Client sends order to `/order`
-2. Matching engine requests `/wallet/lock`
-3. Wallet validates available balance and creates a lock
-4. Order is inserted into orderbook
-5. Engine matches best BUY and SELL
-6. `/wallet/settle` is called with both lock refs
-7. Ledger rows are written atomically
-8. Lock rows are reduced or deleted
-9. Orders are removed or partially filled
+1. User submits an order through the frontend trade form
+2. Next.js API route injects the authenticated user ID and forwards to matching engine
+3. Matching engine requests `POST /wallet/lock` to reserve funds
+4. Wallet validates available balance and creates a lock row
+5. Order is inserted into the in-memory order book
+6. Engine matches best BUY and SELL at price-time priority
+7. Settlement message is published to Kafka (`trade.settlement`)
+8. Wallet service consumes the message and settles atomically inside a DB transaction
+9. Ledger rows are written, lock rows are reduced or deleted
+10. Socket.IO broadcasts order book changes to all subscribers
 
 At no point are funds moved without a verified lock.
 
@@ -56,61 +69,43 @@ At no point are funds moved without a verified lock.
 
 Settlement is performed inside a single database transaction:
 
-* Buyer USDT is debited
-* Seller BTC is debited
+* Buyer's quote asset (USDT) is debited
+* Seller's base asset (BTC) is debited
 * Seller receives USDT
 * Buyer receives BTC
 
 If any step fails, **none of them commit**.
-This prevents partial state corruption.
 
 ---
 
 ### Lock-Based Balance Control
 
-Balances are never directly checked.
-
-Instead:
+Balances are never directly checked. Instead:
 
 ```
 available = ledger_sum - locked_sum
 ```
 
-This prevents:
-
-* overspending
-* race conditions
-* inconsistent reads
-
+This prevents overspending, race conditions, and inconsistent reads.
 Locks act as **temporary ownership claims**.
 
 ---
 
 ### Idempotent Trade Execution
 
-Each settlement uses a unique `ref`.
-
-Before executing, the wallet checks:
+Each settlement uses a unique `ref`. Before executing, the wallet checks:
 
 ```ts
 tx.ledger.findFirst({ where: { ref } })
 ```
 
-If found, the trade is skipped.
-
-This prevents:
-
-* duplicate settlements
-* retry bugs
-* replay attacks
+If found, the trade is skipped — preventing duplicate settlements, retry bugs, and replay attacks.
 
 ---
 
 ### Partial Fills
 
-Locks are **not released** on partial trades.
-
-Instead:
+Locks are **not released** on partial trades. Instead:
 
 ```ts
 lock.amount -= traded_amount
@@ -118,52 +113,76 @@ lock.amount -= traded_amount
 
 Only when the amount reaches zero is the lock deleted.
 
-This mirrors how real exchanges maintain remaining order collateral.
+---
+
+### Kafka-Based Settlement
+
+Trade settlement is decoupled from the matching loop. The matching engine publishes to `trade.settlement` and the wallet service consumes messages in the background. This prevents settlement latency from blocking order matching.
+
+---
+
+## Prerequisites
+
+* **Node.js** ≥ 18
+* **PostgreSQL** — two databases (one for NextAuth users, one for the wallet ledger)
+* **Apache Kafka** — running locally (default `localhost:9092`)
 
 ---
 
 ## Setup
 
-### Wallet Service
+### 1. Wallet Service
 
 ```bash
 cd wallet-service
 npm install
 npx prisma migrate dev
-npm run dev
+npm run dev          # → http://localhost:3001
 ```
 
-### Matching Engine
+### 2. Matching Engine
 
 ```bash
 cd matching-engine
 npm install
-npm run dev
+npm run dev          # → http://localhost:3002
 ```
+
+### 3. Main App (Frontend)
+
+```bash
+cd main-app
+cp .env.local.example .env.local   # configure Google OAuth + DB URLs
+npm install
+npx prisma migrate dev
+npm run dev          # → http://localhost:3000
+```
+
+> **Note:** All three services must be running simultaneously.
 
 ---
 
 ## API Demo
 
-### Fund Users
+### Fund a User
 
 ```bash
 curl -X POST http://localhost:3001/wallet/credit \
   -H "Content-Type: application/json" \
-  -d '{"userId":1,"asset":"USDT","amount":10000}'
+  -d '{"userId":"user_abc123","asset":"USDT","amount":10000}'
 
 curl -X POST http://localhost:3001/wallet/credit \
   -H "Content-Type: application/json" \
-  -d '{"userId":2,"asset":"BTC","amount":5}'
+  -d '{"userId":"user_xyz789","asset":"BTC","amount":5}'
 ```
 
-### Place BUY
+### Place a BUY Order
 
 ```bash
 curl -X POST http://localhost:3002/order \
   -H "Content-Type: application/json" \
   -d '{
-    "userId":1,
+    "userId":"user_abc123",
     "price":30000,
     "qty":1,
     "orderType":"BUY",
@@ -171,13 +190,13 @@ curl -X POST http://localhost:3002/order \
   }'
 ```
 
-### Place SELL
+### Place a SELL Order
 
 ```bash
 curl -X POST http://localhost:3002/order \
   -H "Content-Type: application/json" \
   -d '{
-    "userId":2,
+    "userId":"user_xyz789",
     "price":30000,
     "qty":1,
     "orderType":"SELL",
@@ -185,13 +204,13 @@ curl -X POST http://localhost:3002/order \
   }'
 ```
 
-### Cancel Order
+### Cancel an Order
 
 ```bash
 curl -X POST http://localhost:3002/cancel \
   -H "Content-Type: application/json" \
   -d '{
-    "userId":1,
+    "userId":"user_abc123",
     "orderId":"<lockRef>",
     "market":"BTC/USDT"
   }'
@@ -199,67 +218,82 @@ curl -X POST http://localhost:3002/cancel \
 
 ---
 
+## Frontend
+
+The Next.js frontend provides a complete exchange interface:
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Landing | `/` | Hero section with market preview cards (unauthenticated) |
+| Dashboard | `/` | Welcome banner, live market stats, market picker (authenticated) |
+| Trading | `/market/[symbol]` | Chart, real-time order book, trade form, market sidebar |
+
+**Key components:**
+
+* **OrderBook** — real-time WebSocket updates with depth bars, bid/ask pressure indicator, mid-price with direction arrows
+* **TradeForm** — BUY/SELL toggle, live balance display, order placement with instant order book resync
+* **DepositModal** — portal-based modal for depositing test USDT with preset amounts and live balance
+* **Chart** — candlestick chart using `lightweight-charts` with auto-resize
+* **LiveMarketStats** — price, change %, and liquidity cards that refresh via WebSocket + polling
+
+---
+
 ## Limitations
 
-* In-memory orderbook
-* No persistence for orders
-* No WebSockets
-* No frontend
+* In-memory order book (orders lost on engine restart)
+* No order persistence or order history
+* Demo-only authentication (Google OAuth for local testing)
+* Single-node Kafka (no replication or partitioning)
 
-These were intentionally excluded to isolate **core financial correctness**.
+These are intentional to keep the focus on **core financial correctness**.
 
 ---
 
 ## Demo Liquidity Bots
 
-The matching engine now includes two dedicated bot entrypoints:
+The matching engine includes two bot entrypoints for generating realistic market activity:
 
-* [matching-engine/src/makerBot.ts](/Users/hrishikeshpatel/Desktop/Folder/projects/DSE/matching-engine/src/makerBot.ts)
-* [matching-engine/src/takerBot.ts](/Users/hrishikeshpatel/Desktop/Folder/projects/DSE/matching-engine/src/takerBot.ts)
-
-What they do:
-
-* the maker bot continuously refreshes multi-level passive quotes across all markets
-* the taker bot continuously and randomly crosses liquidity from a small depth window
-* by default the taker bot targets the maker bot's quotes, so fills occur without self-trading
-
-Run them in separate terminals:
+### Run Bots
 
 ```bash
+# Terminal 1 — Maker bot (passive quotes)
 cd matching-engine
 MAKER_USER_ID=9001 MAKER_BOOTSTRAP=true npm run maker-bot
-```
 
-```bash
+# Terminal 2 — Taker bot (crosses liquidity)
 cd matching-engine
 TAKER_USER_ID=9101 MAKER_USER_ID=9001 TAKER_BOOTSTRAP=true npm run taker-bot
 ```
 
-Useful maker environment variables:
+### Maker Bot Environment Variables
 
-* `MAKER_USER_ID` maker account id, default `9001`
-* `MAKER_BOOTSTRAP=true` auto-funds the maker through the wallet credit endpoint
-* `MAKER_LOOP_MS` quote refresh interval, default `4000`
-* `MAKER_QUOTE_SPREAD_BPS` total maker spread in basis points, default `30`
-* `MAKER_QUOTE_LEVELS` number of maker orders per side, default `4`
-* `MAKER_LEVEL_STEP_BPS` extra basis points between quote levels, default `14`
-* `MAKER_REPRICE_THRESHOLD_BPS` minimum drift before cancel/requote, default `8`
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAKER_USER_ID` | `9001` | Maker account ID |
+| `MAKER_BOOTSTRAP` | `false` | Auto-fund via wallet credit endpoint |
+| `MAKER_LOOP_MS` | `4000` | Quote refresh interval |
+| `MAKER_QUOTE_SPREAD_BPS` | `30` | Total spread in basis points |
+| `MAKER_QUOTE_LEVELS` | `4` | Orders per side |
+| `MAKER_LEVEL_STEP_BPS` | `14` | Extra bps between levels |
+| `MAKER_REPRICE_THRESHOLD_BPS` | `8` | Min drift before requote |
 
-Useful taker environment variables:
+### Taker Bot Environment Variables
 
-* `TAKER_USER_ID` taker account id, default `9101`
-* `TAKER_BOOTSTRAP=true` auto-funds the taker through the wallet credit endpoint
-* `MAKER_USER_ID` maker account id to target, default `9001`
-* `TAKER_LOOP_MS` taker scan interval, default `1800`
-* `TAKER_JITTER_MS` random extra delay before a taker action, default `2200`
-* `TAKER_MATCH_PROBABILITY` chance of a taker action per market cycle, default `0.55`
-* `TAKER_DEPTH_WINDOW` number of top levels the taker can choose from, default `4`
-* `TAKER_ONLY_MAKER` when `true` targets only the maker bot's quotes, default `true`
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TAKER_USER_ID` | `9101` | Taker account ID |
+| `TAKER_BOOTSTRAP` | `false` | Auto-fund via wallet credit endpoint |
+| `MAKER_USER_ID` | `9001` | Maker to target |
+| `TAKER_LOOP_MS` | `1800` | Scan interval |
+| `TAKER_JITTER_MS` | `2200` | Random extra delay |
+| `TAKER_MATCH_PROBABILITY` | `0.55` | Action probability per cycle |
+| `TAKER_DEPTH_WINDOW` | `4` | Top levels to choose from |
+| `TAKER_ONLY_MAKER` | `true` | Target only maker bot quotes |
 
-Bot-facing engine endpoints:
+### Bot-Facing Engine Endpoints
 
-* `GET /markets` lists all supported markets
-* `GET /snapshot/:symbol` returns top-of-book, spread, and depth
-* `POST /order` now returns the created `orderId`
+* `GET /markets` — lists all supported markets
+* `GET /snapshot/:symbol` — top-of-book, spread, and depth
+* `POST /order` — returns the created `orderId`
 
-These bots are set up as **demo local exchange participants**. The maker adds laddered liquidity across several prices, and the taker removes liquidity with randomized timing, side selection, and price-level choice. They are not appropriate for real-market deployment without exchange-specific controls, rate limiting, inventory/risk management, and legal/compliance review.
+> These bots are **demo participants only**. They are not suitable for production use without exchange-specific controls, rate limiting, inventory management, and compliance review.

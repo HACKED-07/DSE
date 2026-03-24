@@ -29,6 +29,10 @@ type MarketQuoteState = {
   lastSellSkipReason: string | null;
 };
 
+function orderLockedAmount(side: Side, order: { price: number; qty: number }) {
+  return side === "BUY" ? order.price * order.qty : order.qty;
+}
+
 const MAKER_USER_ID = process.env.MAKER_USER_ID ?? "9001";
 const LOOP_MS = Number(process.env.MAKER_LOOP_MS ?? 4000);
 const QUOTE_SPREAD_BPS = Number(process.env.MAKER_QUOTE_SPREAD_BPS ?? 30);
@@ -148,42 +152,6 @@ async function syncSide(
   const skipReasonKey =
     side === "BUY" ? "lastBuySkipReason" : "lastSellSkipReason";
 
-  const requiredQuote = desiredOrders.reduce(
-    (sum, order) => sum + order.price * order.qty,
-    0,
-  );
-  const requiredBase = desiredOrders.reduce((sum, order) => sum + order.qty, 0);
-
-  if (
-    side === "BUY" &&
-    (balances[config.quoteAsset]?.available ?? 0) < requiredQuote
-  ) {
-    const reason = `insufficient ${config.quoteAsset} available=${balances[config.quoteAsset]?.available ?? 0} required=${roundPrice(requiredQuote)}`;
-    if (state[skipReasonKey] !== reason) {
-      console.log(`[maker] skip ${side} ${config.market}: ${reason}`);
-      state[skipReasonKey] = reason;
-      quoteState.set(config.market, state);
-    }
-    return;
-  }
-
-  if (
-    side === "SELL" &&
-    (balances[config.baseAsset]?.available ?? 0) < requiredBase
-  ) {
-    const reason = `insufficient ${config.baseAsset} available=${balances[config.baseAsset]?.available ?? 0} required=${roundQty(requiredBase)}`;
-    if (state[skipReasonKey] !== reason) {
-      console.log(`[maker] skip ${side} ${config.market}: ${reason}`);
-      state[skipReasonKey] = reason;
-      quoteState.set(config.market, state);
-    }
-    return;
-  }
-
-  if (state[skipReasonKey] !== null) {
-    state[skipReasonKey] = null;
-  }
-
   const reusableOrders: QuoteOrder[] = [];
 
   for (const desiredOrder of desiredOrders) {
@@ -199,7 +167,48 @@ async function syncSide(
     }
   }
 
-  const keptOrders = await cancelSide(config.market, side, existingOrders, reusableOrders);
+  const asset = side === "BUY" ? config.quoteAsset : config.baseAsset;
+  const availableBalance = balances[asset]?.available ?? 0;
+  const releasedAmount = existingOrders
+    .filter(
+      (order) =>
+        !reusableOrders.some((reusableOrder) => reusableOrder.orderId === order.orderId),
+    )
+    .reduce((sum, order) => sum + orderLockedAmount(side, order), 0);
+  const reusedAmount = reusableOrders.reduce(
+    (sum, order) => sum + orderLockedAmount(side, order),
+    0,
+  );
+  const desiredAmount = desiredOrders.reduce(
+    (sum, order) => sum + orderLockedAmount(side, order),
+    0,
+  );
+  let remainingBudget = availableBalance + releasedAmount;
+  const additionalRequired = Math.max(0, desiredAmount - reusedAmount);
+
+  if (remainingBudget + 0.00000001 < additionalRequired) {
+    const reason =
+      side === "BUY"
+        ? `insufficient ${asset} available=${roundPrice(availableBalance)} releasable=${roundPrice(releasedAmount)} required=${roundPrice(additionalRequired)}`
+        : `insufficient ${asset} available=${roundQty(availableBalance)} releasable=${roundQty(releasedAmount)} required=${roundQty(additionalRequired)}`;
+    if (state[skipReasonKey] !== reason) {
+      console.log(`[maker] skip ${side} ${config.market}: ${reason}`);
+      state[skipReasonKey] = reason;
+      quoteState.set(config.market, state);
+    }
+    return;
+  }
+
+  if (state[skipReasonKey] !== null) {
+    state[skipReasonKey] = null;
+  }
+
+  const keptOrders = await cancelSide(
+    config.market,
+    side,
+    existingOrders,
+    reusableOrders,
+  );
   const keptSignature = new Set(keptOrders.map((order) => `${order.price}:${order.qty}`));
   const nextOrders = [...keptOrders];
 
@@ -207,6 +216,19 @@ async function syncSide(
     const signature = `${desiredOrder.price}:${desiredOrder.qty}`;
     if (keptSignature.has(signature)) {
       continue;
+    }
+
+    const requiredAmount = orderLockedAmount(side, desiredOrder);
+    if (remainingBudget + 0.00000001 < requiredAmount) {
+      const reason =
+        side === "BUY"
+          ? `insufficient ${asset} while placing levels remaining=${roundPrice(remainingBudget)} needed=${roundPrice(requiredAmount)}`
+          : `insufficient ${asset} while placing levels remaining=${roundQty(remainingBudget)} needed=${roundQty(requiredAmount)}`;
+      if (state[skipReasonKey] !== reason) {
+        console.log(`[maker] partial ${side} ${config.market}: ${reason}`);
+        state[skipReasonKey] = reason;
+      }
+      break;
     }
 
     const orderId = await submitOrder(
@@ -219,6 +241,7 @@ async function syncSide(
     );
 
     if (orderId) {
+      remainingBudget -= requiredAmount;
       nextOrders.push({
         orderId,
         price: desiredOrder.price,
